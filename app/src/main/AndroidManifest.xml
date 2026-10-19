@@ -4,6 +4,8 @@
     <uses-permission android:name="android.permission.VIBRATE" />
     <application
         android:allowBackup="false"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher_round"
         android:label="Hanab Live"
         android:theme="@style/Theme.Hanab"
         android:usesCleartextTraffic="false">
