@@ -410,42 +410,50 @@ private fun GameBoard(live: GameState, vm: LobbyViewModel, ui: LobbyUiState) {
     }
 
     selected?.let { order ->
+        // Cancel, Discard, Play: the safe way out is the first button and the one furthest from Play,
+        // where a panicked tap lands. (Discard used to sit in the usual "cancel" spot.)
         AlertDialog(
             onDismissRequest = { selected = null },
             title = { Text("Card in slot ${g.hands[g.ourIndex].indexOf(order) + 1}") },
             confirmButton = {
-                Button(
-                    onClick = {
-                        val ids = g.knowledgeOf(g.ourIndex)[order]?.inferred.orEmpty()
-                        if (ids.isNotEmpty() && !g.anyPlayableNow(ids)) {
-                            warn = Triple(order, true, "${g.describe(ids).replaceFirstChar { it.uppercase() }} cannot be played right now. Play it anyway?")
-                        } else vm.play(order)
-                        selected = null
-                    },
-                    enabled = g.ourTurn,
-                ) { Text("Play") }
-            },
-            dismissButton = {
-                TextButton(
-                    onClick = {
-                        val ids = g.knowledgeOf(g.ourIndex)[order]?.inferred.orEmpty()
-                        val reason = when {
-                            g.allCritical(ids) -> "${g.describe(ids)} is the last copy of a card you still need. Discard it anyway?"
-                            g.allPlayableNow(ids) -> "${g.describe(ids)} can be played right now. Discard it anyway?"
-                            else -> null
-                        }
-                        if (reason != null) warn = Triple(order, false, reason.replaceFirstChar { it.uppercase() })
-                        else vm.discard(order)
-                        selected = null
-                    },
-                    enabled = g.ourTurn && g.clues < 8,
-                ) {
-                    Text("Discard")
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    androidx.compose.material3.FilledTonalButton(
+                        onClick = { selected = null },
+                        modifier = Modifier.weight(1f),
+                        contentPadding = PaddingValues(horizontal = 8.dp),
+                    ) { Text("Cancel", maxLines = 1) }
+                    OutlinedButton(
+                        onClick = {
+                            val ids = g.knowledgeOf(g.ourIndex)[order]?.inferred.orEmpty()
+                            val reason = when {
+                                g.allCritical(ids) -> "${g.describe(ids)} is the last copy of a card you still need. Discard it anyway?"
+                                g.allPlayableNow(ids) -> "${g.describe(ids)} can be played right now. Discard it anyway?"
+                                else -> null
+                            }
+                            if (reason != null) warn = Triple(order, false, reason.replaceFirstChar { it.uppercase() })
+                            else vm.discard(order)
+                            selected = null
+                        },
+                        enabled = g.ourTurn && g.clues < 8,
+                        modifier = Modifier.weight(1f),
+                        contentPadding = PaddingValues(horizontal = 8.dp),
+                    ) { Text("Discard", maxLines = 1) }
+                    Button(
+                        onClick = {
+                            val ids = g.knowledgeOf(g.ourIndex)[order]?.inferred.orEmpty()
+                            if (ids.isNotEmpty() && !g.anyPlayableNow(ids)) {
+                                warn = Triple(order, true, "${g.describe(ids).replaceFirstChar { it.uppercase() }} cannot be played right now. Play it anyway?")
+                            } else vm.play(order)
+                            selected = null
+                        },
+                        enabled = g.ourTurn,
+                        modifier = Modifier.weight(1f),
+                        contentPadding = PaddingValues(horizontal = 8.dp),
+                    ) { Text("Play", maxLines = 1) }
                 }
             },
         )
-    }
-}
+    }}
 
 /** A clue being composed: either a colour (suit index) or a rank. */
 sealed interface ClueChoice {
