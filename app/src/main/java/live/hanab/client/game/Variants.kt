@@ -1,0 +1,149 @@
+package live.hanab.client.game
+
+import android.content.Context
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.booleanOrNull
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
+
+/**
+ * How one suit reacts to clues, from hanab.live's suits.json.
+ *  colors      clue colours that touch it (a plain suit: its own colour; Rainbow: none listed)
+ *  allColors   touched by every colour clue (Rainbow)
+ *  noColors    touched by no colour clue (White)
+ *  allRanks    touched by every rank clue (Pink)
+ *  noRanks     touched by no rank clue (Brown)
+ *  fills       display colours as ARGB ints; more than one means a gradient (Rainbow)
+ */
+data class SuitInfo(
+    val name: String,
+    val colors: List<String> = listOf(name),
+    val allColors: Boolean = false,
+    val noColors: Boolean = false,
+    val allRanks: Boolean = false,
+    val noRanks: Boolean = false,
+    val fills: List<Int> = emptyList(),
+    /** Key from suits.json naming the symbol ("auto" = the suit's own name). */
+    val pip: String = "auto",
+    /** Only one copy of each rank exists (Black): every card of the suit is critical. */
+    val oneOfEach: Boolean = false,
+    /** Alternative fills for colour-blind players (only some colours define one). */
+    val fillsColorblind: List<Int> = emptyList(),
+)
+
+/** Suits and variants from the bundled copies of hanab.live's suits.json and variants.json. */
+object Variants {
+    private var suitInfos: Map<String, SuitInfo> = emptyMap()
+    private var suitsByVariant: Map<String, List<String>> = emptyMap()
+    private var supportedNames: List<String> = emptyList()
+
+    /** Suits we cannot model yet (changed copy counts, inverted stacks, rank-dependent colours). */
+    private val unsupportedSuits = mutableSetOf<String>()
+
+    /** Variant keys that are pure metadata; any other key is a special rule we do not implement. */
+    private val plainKeys = setOf("id", "newID", "name", "suits")
+
+    fun load(context: Context) {
+        if (suitInfos.isNotEmpty()) return
+        // Plain suits (Red, Blue, ...) carry no fill of their own: it comes from the colour of the same name.
+        val colorsText = context.assets.open("colors.json").bufferedReader().use { it.readText() }
+        val colorFills = Json.parseToJsonElement(colorsText).jsonArray.mapNotNull { el ->
+            val o = el.jsonObject
+            val n = o.str("name") ?: return@mapNotNull null
+            val c = o.str("fill")?.let(::parseHex) ?: return@mapNotNull null
+            n to c
+        }.toMap()
+        val colorFillsCb = Json.parseToJsonElement(colorsText).jsonArray.mapNotNull { el ->
+            val o = el.jsonObject
+            val n = o.str("name") ?: return@mapNotNull null
+            val c = o.str("fillColorblind")?.let(::parseHex) ?: return@mapNotNull null
+            n to c
+        }.toMap()
+        val suitsText = context.assets.open("suits.json").bufferedReader().use { it.readText() }
+        val infos = mutableMapOf<String, SuitInfo>()
+        for (el in Json.parseToJsonElement(suitsText).jsonArray) {
+            val o = el.jsonObject
+            val name = o.str("name") ?: continue
+            val allColors = o.flag("allClueColors")
+            val noColors = o.flag("noClueColors")
+            val colors = (o["clueColors"] as? JsonArray)?.map { it.jsonPrimitive.content }
+                ?: if (allColors || noColors || o.flag("prism")) emptyList() else listOf(name)
+            var fills = ((o["fillColors"] as? JsonArray)?.map { it.jsonPrimitive.content }
+                ?: listOfNotNull(o.str("fill"))).mapNotNull(::parseHex)
+            val own = fills.isNotEmpty()
+            if (fills.isEmpty()) fills = listOfNotNull(colorFills[name] ?: colors.firstNotNullOfOrNull { colorFills[it] })
+            val fillsCb = if (own) emptyList()
+            else listOfNotNull(colorFillsCb[name] ?: colors.firstNotNullOfOrNull { colorFillsCb[it] })
+            infos[name] = SuitInfo(
+                name, colors, allColors, noColors, o.flag("allClueRanks"), o.flag("noClueRanks"), fills,
+                o.str("pip") ?: "auto",
+                o.flag("oneOfEach"),
+                fillsCb,
+            )
+            if (o.flag("prism") || o.flag("inverted")) unsupportedSuits += name
+        }
+        suitInfos = infos
+
+        val variantsText = context.assets.open("variants.json").bufferedReader().use { it.readText() }
+        val byName = mutableMapOf<String, List<String>>()
+        val ok = mutableListOf<String>()
+        for (el in Json.parseToJsonElement(variantsText).jsonArray) {
+            val o = el.jsonObject
+            val name = o.str("name") ?: continue
+            val suits = (o["suits"] as? JsonArray)?.map { it.jsonPrimitive.content } ?: continue
+            byName[name] = suits
+            if (o.keys.all { it in plainKeys } && suits.all { it in infos && it !in unsupportedSuits }) ok += name
+        }
+        suitsByVariant = byName
+        supportedNames = ok
+    }
+
+    fun suits(variant: String): List<String>? = suitsByVariant[variant]
+
+    fun info(suit: String): SuitInfo = suitInfos[suit] ?: SuitInfo(suit)
+
+    /** Asset file (in assets/pips) holding the symbol for [suit], or null if there is none. */
+    fun pipFile(suit: String): String? {
+        val key = info(suit).pip
+        val file = when (key) {
+            "auto" -> suit.lowercase()
+            "hanabiRed1" -> "red"
+            "hanabiYellow2" -> "yellow"
+            "hanabiGreen3" -> "green"
+            "hanabiBlue4" -> "blue"
+            "hanabiWhite5" -> "purple"
+            "hanabiAltWhite6" -> "teal"
+            "katakanaHe" -> "black"
+            "katakanaNu" -> "brown"
+            "rainbow" -> "rainbow"
+            "hashtag" -> "pink"
+            "moon" -> "white"
+            "infinity" -> "omni"
+            "emptySet" -> "null"
+            "triangle" -> "prism"
+            else -> return null
+        }
+        return "pips/$file.svg"
+    }
+
+    fun isSupported(variant: String) = variant in supportedNames
+
+    /** Everything we can play, for the table-creation search. */
+    fun allSupported(): List<String> = supportedNames
+
+    /** Quick picks shown as chips in the create-table dialog. */
+    val quick = listOf("No Variant", "6 Suits", "Rainbow (5 Suits)", "Rainbow (6 Suits)", "Black (6 Suits)", "4 Suits", "3 Suits")
+
+    private fun JsonObject.str(k: String) = (this[k] as? JsonPrimitive)?.takeIf { it.isString }?.content
+    private fun JsonObject.flag(k: String) = (this[k] as? JsonPrimitive)?.booleanOrNull == true
+
+    private fun parseHex(s: String): Int? {
+        val h = s.removePrefix("#")
+        if (h.length != 6) return null
+        return h.toIntOrNull(16)?.let { 0xFF000000.toInt() or it }
+    }
+}

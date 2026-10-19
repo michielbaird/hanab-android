@@ -1,0 +1,144 @@
+package live.hanab.client
+
+import kotlinx.serialization.json.JsonObject
+import live.hanab.client.game.GameState
+import live.hanab.client.net.HanabJson
+import live.hanab.client.net.unpack
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Test
+
+class GameStateTest {
+    private fun live(frame: String): JsonObject {
+        val m = unpack(frame)!!
+        assertEquals("gameAction", m.command)
+        return (m.data as JsonObject)["action"] as JsonObject
+    }
+
+    private fun start() = GameState(
+        tableID = 1, playerNames = listOf("me", "bob"), ourIndex = 0, spectating = false,
+        variantName = "No Variant", suits = listOf("Red", "Yellow", "Green", "Blue", "Purple"),
+    ).applyAll(
+        (0..3).map { HanabJson.parseToJsonElement("""{"type":"draw","playerIndex":0,"order":$it,"suitIndex":-1,"rank":-1}""") as JsonObject } +
+        (4..7).map { HanabJson.parseToJsonElement("""{"type":"draw","playerIndex":1,"order":$it,"suitIndex":0,"rank":1}""") as JsonObject }
+    )
+
+    @Test fun livePlayThenDraw() {
+        var g = start()
+        g = g.apply(live("""gameAction {"tableID":1,"action":{"type":"play","playerIndex":0,"order":2,"suitIndex":0,"rank":1}}"""))
+        assertFalse(2 in g.hands[0])
+        assertEquals(1, g.stacks[0])
+        g = g.apply(live("""gameAction {"tableID":1,"action":{"type":"draw","playerIndex":0,"order":8,"suitIndex":-1,"rank":-1}}"""))
+        assertEquals(listOf(8, 3, 1, 0), g.hands[0])
+    }
+
+    @Test fun liveClueUpdatesOwnHand() {
+        var g = start()
+        g = g.apply(live("""gameAction {"tableID":1,"action":{"type":"clue","clue":{"type":1,"value":5},"giver":1,"list":[1,3],"target":0,"ignoreNegative":false}}"""))
+        assertEquals(setOf(5), g.cards[1]!!.possibleRanks)
+        assertEquals(setOf(1, 2, 3, 4), g.cards[0]!!.possibleRanks)
+    }
+
+    @Test fun deadCards() {
+        fun d(order: Int, rank: Int) = HanabJson.parseToJsonElement("""{"type":"discard","playerIndex":1,"order":$order,"suitIndex":0,"rank":$rank,"failed":false}""") as JsonObject
+        fun draw(order: Int, rank: Int) = HanabJson.parseToJsonElement("""{"type":"draw","playerIndex":1,"order":$order,"suitIndex":0,"rank":$rank}""") as JsonObject
+        var g = start().applyAll(listOf(draw(20, 2), draw(21, 2), draw(22, 3), draw(23, 1)))
+        // red 1 not played yet: red 3 is alive; discarding both red 2s kills it.
+        assertFalse(g.isDead(g.cards[22]!!))
+        g = g.applyAll(listOf(d(20, 2), d(21, 2)))
+        assert(g.isDead(g.cards[22]!!))
+        // a played red 1 is dead
+        g = g.apply(HanabJson.parseToJsonElement("""{"type":"play","playerIndex":1,"order":23,"suitIndex":0,"rank":1}""") as JsonObject)
+        assert(g.isDead(g.cards[23]!!))
+    }
+    @Test fun inferenceRemovesExhaustedIdentities() {
+        // We hold orders 0..3 (unknown). Bob (player 1) holds red 1s at 4..7 in start(); put two more
+        // red 1s... the third copy: discard one red 1 and Bob holds two => all 3 red 1s are visible to us.
+        var g = start()
+        g = g.apply(HanabJson.parseToJsonElement("""{"type":"discard","playerIndex":1,"order":4,"suitIndex":0,"rank":1,"failed":false}""") as JsonObject)
+        // Seen red 1s: 4 (discarded), 5, 6, 7 => 4 copies > 3, so red 1 is impossible for our cards.
+        // Clue one of our cards as red (touches order 1): direct = red 1..5, inferred loses red 1.
+        g = g.apply(HanabJson.parseToJsonElement("""{"type":"clue","clue":{"type":0,"value":0},"giver":1,"list":[1],"target":0,"ignoreNegative":false}""") as JsonObject)
+        val k = g.knowledgeOf(0).getValue(1)
+        assert(0 to 1 in k.direct)
+        assert(0 to 1 !in k.inferred)
+        assertEquals(setOf(2, 3, 4, 5), k.inferredRanks)
+    }
+    @Test fun criticalCards() {
+        var g = start()
+        assert(g.isCriticalIdentity(0, 5))          // 5s have a single copy
+        assert(!g.isCriticalIdentity(0, 2))         // two copies still around
+        g = g.apply(HanabJson.parseToJsonElement("""{"type":"draw","playerIndex":1,"order":30,"suitIndex":0,"rank":2}""") as JsonObject)
+        g = g.apply(HanabJson.parseToJsonElement("""{"type":"discard","playerIndex":1,"order":30,"suitIndex":0,"rank":2,"failed":false}""") as JsonObject)
+        assert(g.isCriticalIdentity(0, 2))          // one red 2 gone: the other is critical
+        assert(!g.isCriticalIdentity(0, 1) )        // three red 1s, none discarded
+    }
+    @Test fun replayToEarlierTurn() {
+        fun j(s: String) = HanabJson.parseToJsonElement(s) as JsonObject
+        var g = start()
+        g = g.apply(j("""{"type":"turn","num":0,"currentPlayerIndex":0}"""))
+        g = g.apply(j("""{"type":"play","playerIndex":0,"order":2,"suitIndex":0,"rank":1}"""))
+        g = g.apply(j("""{"type":"draw","playerIndex":0,"order":8,"suitIndex":-1,"rank":-1}"""))
+        g = g.apply(j("""{"type":"turn","num":1,"currentPlayerIndex":1}"""))
+        assertEquals(2, g.turnStops.size)
+        val past = g.replayTo(g.turnStops[0])
+        assert(2 in past.hands[0])        // before the play, the card is still in hand
+        assertEquals(0, past.stacks[0])
+        assert(past.readOnly && !past.ourTurn)
+        assertFalse(2 in g.hands[0])      // live state unchanged
+        assertEquals(1, g.stacks[0])
+        assertEquals(2, g.remaining(0, 1)) // one red 1 played of three
+    }
+    @Test fun rainbowIsTouchedByEveryColour() {
+        fun j(s: String) = HanabJson.parseToJsonElement(s) as JsonObject
+        val infos = listOf(
+            live.hanab.client.game.SuitInfo("Red"),
+            live.hanab.client.game.SuitInfo("Yellow"),
+            live.hanab.client.game.SuitInfo("Rainbow", colors = emptyList(), allColors = true),
+        )
+        var g = GameState(
+            tableID = 1, playerNames = listOf("me", "bob"), ourIndex = 0, spectating = false,
+            variantName = "Rainbow (3 Suits)", suits = infos.map { it.name }, suitInfos = infos,
+        )
+        assertEquals(listOf("Red", "Yellow"), g.clueColors)        // Rainbow adds no colour of its own
+        assert(g.touchesColor(2, 0) && g.touchesColor(2, 1))       // Rainbow: touched by red and yellow
+        assert(g.touchesColor(0, 0) && !g.touchesColor(0, 1))
+        // Our card 0 is touched by a red clue: it is Red or Rainbow, never Yellow.
+        g = g.apply(j("""{"type":"draw","playerIndex":0,"order":0,"suitIndex":-1,"rank":-1}"""))
+        g = g.apply(j("""{"type":"draw","playerIndex":0,"order":1,"suitIndex":-1,"rank":-1}"""))
+        g = g.apply(j("""{"type":"clue","clue":{"type":0,"value":0},"giver":1,"list":[0],"target":0,"ignoreNegative":false}"""))
+        assertEquals(setOf(0, 2), g.cards[0]!!.possibleSuits)
+        // Card 1 was not touched by red, so it is neither Red nor Rainbow: it must be Yellow.
+        assertEquals(setOf(1), g.cards[1]!!.possibleSuits)
+    }
+    @Test fun turnOrderAndFinalScore() {
+        fun j(s: String) = HanabJson.parseToJsonElement(s) as JsonObject
+        val g = GameState(
+            tableID = 1, playerNames = listOf("a", "b", "c", "me", "e"), ourIndex = 3, spectating = false,
+            variantName = "No Variant", suits = listOf("Red", "Yellow", "Green", "Blue", "Purple"),
+        )
+        // After "me" (3) come e (4), a (0), b (1), c (2): top to bottom, with me at the bottom.
+        assertEquals(listOf(4, 0, 1, 2), g.othersInTurnOrder)
+        var s = g.apply(j("""{"type":"status","clues":4,"score":17,"maxScore":25}"""))
+        assertEquals(17, s.finalScore)                       // in progress: progress counts
+        s = s.apply(j("""{"type":"gameOver","endCondition":2,"playerIndex":0,"votes":null}"""))
+        assertEquals(0, s.finalScore)                        // strikeout: score is zero
+        val won = g.apply(j("""{"type":"status","clues":4,"score":25,"maxScore":25}"""))
+            .apply(j("""{"type":"gameOver","endCondition":1,"playerIndex":0,"votes":null}"""))
+        assertEquals(25, won.finalScore)                     // normal ending keeps the score
+    }
+    @Test fun blackSuitHasOneCopyOfEachRank() {
+        val infos = listOf(
+            live.hanab.client.game.SuitInfo("Red"),
+            live.hanab.client.game.SuitInfo("Black", oneOfEach = true),
+        )
+        val g = GameState(
+            tableID = 1, playerNames = listOf("me", "bob"), ourIndex = 0, spectating = false,
+            variantName = "Black (2 Suits)", suits = listOf("Red", "Black"), suitInfos = infos,
+        )
+        assertEquals(15, g.deckSize)                         // 10 red + 5 black
+        assertEquals(1, g.copies(1, 1))                      // one black 1, not three
+        assertEquals(3, g.copies(0, 1))                      // red 1s unchanged
+        assert(g.isCriticalIdentity(1, 1) && g.isCriticalIdentity(1, 3))   // every black card is critical
+        assert(!g.isCriticalIdentity(0, 3))
+    }}

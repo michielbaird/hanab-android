@@ -1,0 +1,48 @@
+[
+  {
+    "name": "Red",
+    "fill": "#e60000"
+  },
+  {
+    "name": "Yellow",
+    "fill": "#e6e600"
+  },
+  {
+    "name": "Green",
+    "fill": "#02ec00",
+    "fillColorblind": "#00aa00"
+  },
+  {
+    "name": "Blue",
+    "fill": "#0037ff",
+    "fillColorblind": "#0055ff"
+  },
+  {
+    "name": "Purple",
+    "fill": "#6600cc",
+    "fillColorblind": "#8800aa"
+  },
+  {
+    "name": "Teal",
+    "fill": "#00cccc"
+  },
+  {
+    "name": "Black",
+    "abbreviation": "K",
+    "fill": "#111111"
+  },
+  {
+    "name": "Pink",
+    "abbreviation": "I",
+    "fill": "#ff69b4"
+  },
+  {
+    "name": "Brown",
+    "abbreviation": "N",
+    "fill": "#654321"
+  },
+  {
+    "name": "Orange",
+    "fill": "#ff8800"
+  }
+]

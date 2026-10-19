@@ -1,0 +1,37 @@
+# Gradle
+.gradle/
+build/
+!gradle/wrapper/gradle-wrapper.jar
+
+# Machine-specific: holds the SDK path (written by Android Studio / build setup)
+local.properties
+
+# Android Studio / IntelliJ
+.idea/
+*.iml
+*.ipr
+*.iws
+captures/
+.externalNativeBuild/
+.cxx/
+
+# Build outputs
+*.apk
+*.aab
+*.ap_
+*.dex
+
+# Signing material and secrets: never commit these
+*.jks
+*.keystore
+keystore.properties
+*.pem
+.env
+
+# Logs, OS and editor noise
+*.log
+.DS_Store
+Thumbs.db
+*.swp
+.vscode/
+.claude/
