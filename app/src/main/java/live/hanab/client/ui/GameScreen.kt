@@ -143,7 +143,7 @@ fun GameScreen(ui: LobbyUiState, g: GameState, vm: LobbyViewModel) {
         val wide = maxWidth >= 700.dp
         // On a tall tablet there is room to make the whole board bigger.
         val scale = if (wide && maxHeight >= 600.dp) 1.25f else 1f
-        Surface(Modifier.fillMaxSize()) {
+        Surface(Modifier.fillMaxSize(), color = Color.Transparent, contentColor = MaterialTheme.colorScheme.onBackground) {
             Column(Modifier.safeDrawingPadding()) {
                 if (wide) {
                     Row(Modifier.fillMaxSize()) {
@@ -268,7 +268,7 @@ private fun GameBoard(live: GameState, vm: LobbyViewModel, ui: LobbyUiState) {
     LaunchedEffect(g.ourTurn) { if (!g.ourTurn) { selected = null; warn = null } }
 
     Box(Modifier.fillMaxSize().onGloballyPositioned { origin = it.positionInRoot() }) {
-    Surface(Modifier.fillMaxSize()) {
+    Surface(Modifier.fillMaxSize(), color = Color.Transparent, contentColor = MaterialTheme.colorScheme.onBackground) {
         Column(Modifier) {
             // Pinned: the discard button and the stacks are where cards fly to, so they must stay on screen.
             Column(

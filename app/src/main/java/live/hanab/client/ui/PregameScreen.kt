@@ -24,6 +24,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import live.hanab.client.BotStore
 import live.hanab.client.LobbyUiState
@@ -43,7 +44,7 @@ fun PregameScreen(ui: LobbyUiState, vm: LobbyViewModel) {
         .filter { u -> BotStore.isBot(u.name) && players.none { it.equals(u.name, true) } }
         .sortedBy { it.name.lowercase() }
 
-    Surface(Modifier.fillMaxSize()) {
+    Surface(Modifier.fillMaxSize(), color = Color.Transparent, contentColor = MaterialTheme.colorScheme.onBackground) {
         Column(Modifier.safeDrawingPadding().padding(24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Column(
                 Modifier.weight(1f).verticalScroll(rememberScrollState()),

@@ -39,6 +39,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import live.hanab.client.LobbyUiState
 import live.hanab.client.LobbyViewModel
@@ -52,7 +53,7 @@ fun LobbyScreen(ui: LobbyUiState, vm: LobbyViewModel) {
     val pmBadge = if (ui.pmUnread.isEmpty()) "" else " (${ui.pmUnread.size})"
     val titles = listOf("Tables (${ui.tables.size})", "Chat", "Users (${ui.users.size})", "PMs$pmBadge")
 
-    Surface(Modifier.fillMaxSize()) {
+    Surface(Modifier.fillMaxSize(), color = Color.Transparent, contentColor = MaterialTheme.colorScheme.onBackground) {
         Column(Modifier.safeDrawingPadding().imePadding()) {
             Row(
                 Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),

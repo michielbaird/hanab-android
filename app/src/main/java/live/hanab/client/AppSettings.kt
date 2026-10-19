@@ -28,6 +28,9 @@ object AppSettings {
     var haptics by mutableStateOf(true); private set
     var keepAwake by mutableStateOf(true); private set
 
+    /** The faint fireworks picture behind every screen. */
+    var backdrop by mutableStateOf(true); private set
+
     /** The last table password typed when creating or joining a table (people usually reuse one). */
     var lastPassword by mutableStateOf(""); private set
 
@@ -41,6 +44,7 @@ object AppSettings {
         volume = prefs.getInt("volume", 50)
         haptics = prefs.getBoolean("haptics", true)
         keepAwake = prefs.getBoolean("keepAwake", true)
+        backdrop = prefs.getBoolean("backdrop", true)
         lastPassword = prefs.getString("lastPassword", "") ?: ""
     }
 
@@ -57,6 +61,7 @@ object AppSettings {
     fun changeSoundMode(v: SoundMode) { soundMode = v; prefs.edit().putString("soundMode", v.name).apply() }
     fun changeVolume(v: Int) { volume = v.coerceIn(0, 100); prefs.edit().putInt("volume", volume).apply() }
     fun changeHaptics(v: Boolean) { haptics = v; prefs.edit().putBoolean("haptics", v).apply() }
+    fun changeBackdrop(v: Boolean) { backdrop = v; prefs.edit().putBoolean("backdrop", v).apply() }
     fun changeKeepAwake(v: Boolean) { keepAwake = v; prefs.edit().putBoolean("keepAwake", v).apply() }
 
     private inline fun <reified E : Enum<E>> enumOf(key: String, default: E): E =

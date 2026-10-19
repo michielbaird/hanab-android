@@ -21,6 +21,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
@@ -32,7 +33,7 @@ fun LoginScreen(ui: LobbyUiState, vm: LobbyViewModel) {
     var username by remember { mutableStateOf(vm.savedUsername) }
     var password by remember { mutableStateOf("") }
 
-    Surface(Modifier.fillMaxSize()) {
+    Surface(Modifier.fillMaxSize(), color = Color.Transparent, contentColor = MaterialTheme.colorScheme.onBackground) {
         Column(
             Modifier.safeDrawingPadding().imePadding().padding(24.dp),
             verticalArrangement = Arrangement.Center,
