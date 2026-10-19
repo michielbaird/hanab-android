@@ -1,0 +1,93 @@
+# Hanab Live for Android
+
+An unofficial Android client for [hanab.live](https://hanab.live), the free web version of the card
+game Hanabi. The website's interface does not scale well to a phone, so this app is a native
+Kotlin / Jetpack Compose client built for touch: it talks to the same server, so you play in the same
+lobby and the same games as everyone on the website.
+
+> **Unofficial.** This is a fan project. It is not made by, or endorsed by, the hanab.live
+> maintainers. Please keep the load on their server reasonable.
+
+## What it does
+
+**Lobby**
+- Log in (a new username creates an account, as on the website). The password is stored encrypted
+  with an Android Keystore key, and the app signs in again on launch and after a dropped connection.
+- Tables, lobby chat, user list, private messages (`/pm`, `/w`, `/msg`, ... work as on the website).
+- Create a table (variant search, optional password, remembered) or join, watch, or open a shared replay.
+
+**Playing**
+- Play, discard and clue, with a confirmation when you try something you already know is wrong
+  (playing a card you know is unplayable, discarding a known critical or playable card).
+- Clue panel on your turn only: pick a partner and a clue; invalid clues are disabled, the cards a
+  clue would touch light up, and the choice carries over when you switch partner.
+- Clue bubbles on the cards a clue touched, for the turn after it.
+- Notes (long-press a card), discard pile, and a "cards left" grid.
+- "What I know": every card of yours shows its remaining possibilities, with a red X over anything
+  ruled out only by counting visible cards. A toggle shows what a partner knows about their hand.
+- Critical (`!`) and discardable (bin) markers, dead cards dimmed, touched cards raised.
+- Step back through earlier turns, also during a game. After a game: score, share link, play again,
+  and a shared replay that follows the leader.
+- Animations for plays, discards, draws, and the stacks; sounds and vibration taken from the website.
+- Suit symbols on cards (for colour-blind players), a colour-blind palette, tablet and landscape layout.
+  Everything can be switched off or tuned in Settings.
+
+**Variants**
+Plain suits, Rainbow, Pink, Brown, White, Black and other simple suits: 278 of the website's variants.
+Variants with special rules (e.g. Funnels, Chimneys, Odds and Evens, Prism) are not supported yet and
+are not offered when creating a table.
+
+**Bots**
+Built for hosting [scala-bot](https://github.com/will-hanabi-bot/scala-bot): mark a user as a bot in the
+Users tab, then use **Invite bots** in the pregame. The app sets the conventions and fast mode, then
+joins the bot to your table by private message. You can also kick bots, set conventions for all of
+them, and ask a bot to analyze a finished game.
+
+## Building
+
+Requirements: Android Studio (or the Android SDK), **JDK 17**, and the Android SDK platform 35.
+
+```powershell
+$env:JAVA_HOME = "C:\path\to\jdk-17"
+.\build.ps1                      # builds app\build\outputs\apk\debug\app-debug.apk
+.\build.ps1 testDebugUnitTest    # runs the unit tests
+```
+
+Or open the folder in Android Studio, set Settings > Build Tools > Gradle > Gradle JDK to 17, and press Run.
+
+Notes:
+- Newer JDKs (21 and 25) made Gradle 8.9 fail here with "Unable to establish loopback connection".
+- `build.ps1` points `TEMP` at `C:\gtmp`, because the same error appears when the temp path is long.
+- `local.properties` (the SDK path) is machine-specific and not committed.
+
+## How it works
+
+The client speaks the website's own protocol: `POST /login`, which sets a session cookie, then a
+WebSocket at `/ws` carrying `command {json}` frames. The game rules and clue behaviour are
+reimplemented from the website's shared game code, driven by the server's stream of game actions.
+
+| Path | What is there |
+|---|---|
+| `net/` | HTTP login, WebSocket client, message models |
+| `game/GameState.kt` | Immutable game state, clue rules, deduction, replay of earlier turns |
+| `game/Variants.kt` | Suits and variants, read from the bundled `suits.json` / `variants.json` |
+| `LobbyViewModel.kt` | Connection, lobby, game and bot state |
+| `ui/` | Compose screens (lobby, pregame, game board, dialogs, animations) |
+
+The game logic has unit tests (`app/src/test`). The screens have no automated tests yet.
+
+## Caveats
+
+- The login sends `version=bot`, which the server accepts in place of the website's version number.
+  Without it, the server rejects clients that are not the current website build.
+- The double-discard sounds and the variant-specific sounds from the website are not implemented.
+
+## Licence and credits
+
+Released under the **GNU GPL v3** (see [LICENSE](LICENSE)).
+
+The suit symbols, sound effects, and the suits / variants / colours data are taken from the
+[hanabi-live](https://github.com/Hanabi-Live/hanabi-live) repository (GPL-3.0). Where its artwork
+comes from is documented in `public/img/pips/notes.txt` in that repository; a copy of its licence is in
+`app/src/main/assets/pips/`. Hanabi is a card game by Antoine Bauza; this project is not affiliated with
+its publishers.
