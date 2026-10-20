@@ -141,4 +141,53 @@ class GameStateTest {
         assertEquals(3, g.copies(0, 1))                      // red 1s unchanged
         assert(g.isCriticalIdentity(1, 1) && g.isCriticalIdentity(1, 3))   // every black card is critical
         assert(!g.isCriticalIdentity(0, 3))
+    }
+    @Test fun denominatorIsPerfectScoreAfterTheGame() {
+        fun j(s: String) = HanabJson.parseToJsonElement(s) as JsonObject
+        var g = GameState(
+            tableID = 1, playerNames = listOf("a", "me"), ourIndex = 1, spectating = false,
+            variantName = "No Variant", suits = listOf("Red", "Yellow", "Green", "Blue", "Purple"),
+        )
+        // A critical card was discarded: the best reachable score fell to 24 while the game is on.
+        g = g.apply(j("""{"type":"status","clues":4,"score":24,"maxScore":24}"""))
+        assertEquals(24, g.scoreDenominator)                 // in progress: show what is still reachable
+        assertEquals(25, g.perfectScore)
+        g = g.apply(j("""{"type":"gameOver","endCondition":1,"playerIndex":0,"votes":null}"""))
+        assertEquals(25, g.scoreDenominator)                 // finished: out of the true perfect score
+        assertEquals("Out of cards", g.endText)              // 24/25 is not a perfect game
+    }
+    private fun j(s: String) = HanabJson.parseToJsonElement(s) as JsonObject
+
+    /** Two cards that could each only be red 5 or yellow 5 hold both 5s between them. */
+    @Test fun deductionFindsPigeonholes() {
+        var g = GameState(
+            tableID = 1, playerNames = listOf("me", "bob"), ourIndex = 0, spectating = false,
+            variantName = "2 Suits", suits = listOf("Red", "Yellow"),
+        )
+        g = g.apply(j("""{"type":"draw","playerIndex":0,"order":0,"suitIndex":-1,"rank":-1}"""))
+        g = g.apply(j("""{"type":"draw","playerIndex":0,"order":1,"suitIndex":-1,"rank":-1}"""))
+        // A 5 clue touches both: each is a red 5 or a yellow 5.
+        g = g.apply(j("""{"type":"clue","clue":{"type":1,"value":5},"giver":1,"list":[0,1],"target":0,"ignoreNegative":false}"""))
+        // A new card, no clues at all: any of the 10 identities by clues alone.
+        g = g.apply(j("""{"type":"draw","playerIndex":0,"order":2,"suitIndex":-1,"rank":-1}"""))
+        val k = g.knowledgeOf(0).getValue(2)
+        assertEquals(setOf(1, 2, 3, 4, 5), k.directRanks)
+        // Both 5s are taken by the two clued cards, so the new card cannot be a 5.
+        assertEquals(setOf(1, 2, 3, 4), k.inferredRanks)
+        // The two clued cards themselves stay red-5-or-yellow-5.
+        assertEquals(setOf(0 to 5, 1 to 5), g.knowledgeOf(0).getValue(0).inferred)
+    }
+
+    /** Watching a game: the player in the observed slot has deductions too (so the toggle works there). */
+    @Test fun spectatorCanSeeWhatTheObservedPlayerKnows() {
+        var g = GameState(
+            tableID = 1, playerNames = listOf("a", "b"), ourIndex = 0, spectating = true,
+            variantName = "2 Suits", suits = listOf("Red", "Yellow"),
+        )
+        g = g.apply(j("""{"type":"draw","playerIndex":0,"order":0,"suitIndex":0,"rank":5}"""))   // a spectator sees red 5
+        g = g.apply(j("""{"type":"draw","playerIndex":1,"order":1,"suitIndex":1,"rank":5}"""))   // and yellow 5
+        g = g.apply(j("""{"type":"clue","clue":{"type":1,"value":5},"giver":1,"list":[0],"target":0,"ignoreNegative":false}"""))
+        val k = g.knowledgeOf(0).getValue(0)
+        // Player a was told "5", and can see b's yellow 5: their card must be the red 5.
+        assertEquals(setOf(0 to 5), k.inferred)
     }}

@@ -178,7 +178,7 @@ private fun GameBoard(live: GameState, vm: LobbyViewModel, ui: LobbyUiState) {
     val moves = ui.moves
     // Review mode: index into live.turnStops, or null for the live game. Everything below draws `g`.
     var reviewIdx by remember { mutableStateOf<Int?>(null) }
-    val g = reviewIdx?.let { i -> live.turnStops.getOrNull(i)?.let(live::replayTo) } ?: live
+    val g = remember(live, reviewIdx) { reviewIdx?.let { i -> live.turnStops.getOrNull(i)?.let(live::replayTo) } ?: live }
 
     // Shared replay: the leader's segment drives everyone who is following; the leader's own steps are broadcast.
     val replay = ui.replay
@@ -324,8 +324,8 @@ private fun GameBoard(live: GameState, vm: LobbyViewModel, ui: LobbyUiState) {
                 // Our own hand always shows what we know / can deduce (a spectator sees real cards instead).
                 // After the game every card is public, so (as for partners) knowledge becomes a toggle.
                 val myKn = when {
-                    g.revealAll -> if (g.ourIndex in infoOn) g.knowledgeOf(g.ourIndex) else null
-                    g.spectating -> null
+                    // Everything is visible (replay, or watching): the bottom hand gets a toggle like the others.
+                    g.revealAll || g.spectating -> if (g.ourIndex in infoOn) g.knowledgeOf(g.ourIndex) else null
                     else -> g.knowledgeOf(g.ourIndex)
                 }
                 Column(Modifier.turnGlow(g.phase == Phase.Playing && g.currentPlayer == g.ourIndex)) {
@@ -337,7 +337,8 @@ private fun GameBoard(live: GameState, vm: LobbyViewModel, ui: LobbyUiState) {
                             color = if (g.ourTurn) MaterialTheme.colorScheme.primary else Color.Unspecified,
                             modifier = Modifier.weight(1f),
                         )
-                        if (g.revealAll && !g.spectating) InfoToggle("What I knew", g.ourIndex in infoOn) { toggleInfo(g.ourIndex) }
+                        if (g.spectating) InfoToggle("What they know", g.ourIndex in infoOn) { toggleInfo(g.ourIndex) }
+                        else if (g.revealAll) InfoToggle("What I knew", g.ourIndex in infoOn) { toggleInfo(g.ourIndex) }
                     }
                     LazyRow(
                         contentPadding = PaddingValues(top = RAISE, bottom = 12.dp),
@@ -943,7 +944,7 @@ private fun EndPanel(g: GameState, ui: LobbyUiState, onWatch: () -> Unit, vm: Lo
     Surface(tonalElevation = 4.dp, shape = RoundedCornerShape(12.dp)) {
         Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text(g.endText, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-            Text("Score ${g.finalScore} / ${g.maxScore}", style = MaterialTheme.typography.titleMedium)
+            Text("Score ${g.finalScore} / ${g.scoreDenominator}", style = MaterialTheme.typography.titleMedium)
             Text(g.playerNames.joinToString(", "), style = MaterialTheme.typography.bodySmall)
             ui.error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -1084,7 +1085,7 @@ private fun GameHeader(
                         .border(1.5.dp, Color(0xFFB0BEC5), RoundedCornerShape(4.dp)),
                     contentAlignment = Alignment.Center,
                 ) { Text("${g.deckSize}", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color.White) }
-                Text("${g.finalScore}/${g.maxScore}", fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                Text("${g.finalScore}/${g.scoreDenominator}", fontSize = 14.sp, fontWeight = FontWeight.Bold)
                 // discard pile: a bin with the count
                 OutlinedButton(
                     onClick = onDiscards,

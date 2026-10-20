@@ -16,6 +16,8 @@ data class Card(
     /** (suit, rank) identities still possible given the clues this card has received. */
     val possible: Set<Pair<Int, Int>>,
     val clued: Boolean = false,
+    /** Some clue (touching it or not) has been given to the hand this card is in; it helps deduction. */
+    val clueApplied: Boolean = false,
 ) {
     val possibleSuits: Set<Int> get() = possible.mapTo(HashSet()) { it.first }
     val possibleRanks: Set<Int> get() = possible.mapTo(HashSet()) { it.second }
@@ -111,12 +113,21 @@ data class GameState(
     /** The other players in the order they will act after us; the last one acts just before us. */
     val othersInTurnOrder: List<Int> get() = (1 until numPlayers).map { (ourIndex + it) % numPlayers }
 
+    /** The best score the variant allows: 5 per suit. (The server's `maxScore` shrinks as critical cards are lost.) */
+    val perfectScore: Int get() = suits.size * 5
+
+    /**
+     * What to print after the "/": while playing, the best score still reachable (it drops when a
+     * critical card is discarded, which is useful to see); once the game is over, the true perfect score.
+     */
+    val scoreDenominator: Int get() = if (phase == Phase.Over) perfectScore else maxScore
+
     /** Any ending other than a normal finish (strikeout, timeout, terminated, ...) scores zero. */
     val finalScore: Int get() = if (phase == Phase.Over && (endCondition ?: 1) > 1) 0 else score
 
     /** Short human text for how the game ended. */
     val endText: String get() = when (endCondition) {
-        1 -> if (score == maxScore) "Perfect score" else "Out of cards"
+        1 -> if (score == perfectScore) "Perfect score" else "Out of cards"
         2 -> "Three strikes"
         3 -> "Time ran out"
         4 -> "Terminated by a player"
@@ -234,7 +245,7 @@ data class GameState(
                         val kept = c.possible.filter { (s, r) ->
                             (if (isColor) touchesColor(s, value) else touchesRank(s, r, value)) == hit
                         }.toSet()
-                        c.copy(possible = kept.ifEmpty { c.possible }, clued = c.clued || hit)
+                        c.copy(possible = kept.ifEmpty { c.possible }, clued = c.clued || hit, clueApplied = true)
                     }
                 }
                 val what = if (isColor) clueColors.getOrElse(value) { "?" } else "$value"
@@ -277,36 +288,24 @@ data class GameState(
     /** Playable-now check used for hints in the UI. */
     fun isPlayable(c: Card) = c.suit in stacks.indices && c.rank == stacks[c.suit] + 1
 
+    /** Every deduction for this position, computed once on first use (see [Deduction]). */
+    private val deduced: Map<Int, Set<Pair<Int, Int>>> by lazy {
+        val d = Deduction(this)
+        d.run().mapValues { (_, ids) -> ids.mapTo(HashSet()) { d.toPair(it) } }
+    }
+
     /**
      * What player [p] can work out about each card in their hand, from where we sit.
      *  - direct: identities not ruled out by the clues that touched / missed the card.
-     *  - inferred: direct, minus identities whose every copy is visible to [p] (in other hands, the
-     *    discards or the stacks), repeated while cards in the hand resolve to a single identity.
-     * For a partner this is a lower bound: they also see our hand, which we can't.
+     *  - inferred: what is left after also checking that the other cards they can use could actually
+     *    hold the remaining copies, the way the website does (see [Deduction]).
+     * For our own hand this is what we can deduce; for a partner, what they can deduce, using our best
+     * deduction for the cards in our hand that they can see and we cannot.
      */
-    fun knowledgeOf(p: Int): Map<Int, Knowledge> {
-        val hand = hands.getOrElse(p) { emptyList() }.mapNotNull { cards[it] }
-        val mine = hand.map { it.order }.toSet()
-        val seen = HashMap<Pair<Int, Int>, Int>()
-        for (c in cards.values) {
-            if (c.suit >= 0 && c.rank >= 0 && c.order !in mine) seen.merge(c.suit to c.rank, 1, Int::plus)
-        }
-        val direct = hand.associate { c ->
-            c.order to c.possible
-        }
-        var inferred = direct.mapValues { (_, set) ->
-            set.filter { (s, r) -> (seen[s to r] ?: 0) < copies(s, r) }.toSet().ifEmpty { set }
-        }
-        repeat(6) {
-            val taken = HashMap<Pair<Int, Int>, Int>()
-            inferred.values.filter { it.size == 1 }.forEach { taken.merge(it.first(), 1, Int::plus) }
-            inferred = inferred.mapValues { (_, set) ->
-                if (set.size == 1) set
-                else set.filter { id -> (seen[id] ?: 0) + (taken[id] ?: 0) < copies(id.first, id.second) }.toSet().ifEmpty { set }
-            }
-        }
-        return direct.mapValues { (o, d) -> Knowledge(d, inferred.getValue(o)) }
-    }
+    fun knowledgeOf(p: Int): Map<Int, Knowledge> =
+        hands.getOrElse(p) { emptyList() }.mapNotNull { o ->
+            cards[o]?.let { c -> o to Knowledge(c.possible, deduced[o] ?: c.possible) }
+        }.toMap()
 
     /** True if at least one of [ids] could be played on its stack right now. */
     fun anyPlayableNow(ids: Set<Pair<Int, Int>>) = ids.any { (s, r) -> s in stacks.indices && r == stacks[s] + 1 }

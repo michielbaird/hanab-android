@@ -116,6 +116,6 @@ class MoveSoundTracker {
 /** Name of the jingle for a finished game, as the website picks it. */
 fun finishedSound(after: GameState): String = when {
     (after.endCondition ?: 1) > 1 -> "finished_fail"
-    after.score == after.maxScore -> "finished_perfect"
+    after.score == after.perfectScore -> "finished_perfect"
     else -> "finished_success"
 }

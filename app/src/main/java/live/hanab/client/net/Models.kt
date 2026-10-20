@@ -7,6 +7,10 @@ data class Welcome(
     val userID: Int = 0,
     val username: String = "",
     val playingAtTables: List<Int> = emptyList(),
+    /** A table we were watching when the connection dropped (the server remembers it for us). */
+    val disconSpectatingTable: Int? = null,
+    /** The seat we were shadowing there, or -1 / null. */
+    val disconShadowingSeat: Int? = null,
     val randomTableName: String = "",
 )
 

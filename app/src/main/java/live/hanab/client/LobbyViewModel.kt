@@ -507,12 +507,34 @@ class LobbyViewModel(app: Application) : AndroidViewModel(app) {
         }
         when (m.command) {
             "welcome" -> m.decode<Welcome>()?.let { w ->
-                _ui.update { it.copy(me = w, loggedIn = true, loggingIn = false, reconnecting = false) }
+                val watching = w.disconSpectatingTable?.takeIf { it > 0 }
+                _ui.update { s ->
+                    var next = s.copy(me = w, loggedIn = true, loggingIn = false, reconnecting = false)
+                    // After a reconnect the server may no longer have us at the table our screen shows:
+                    // it removes a player from an unstarted table when the connection drops. It keeps
+                    // our seat in a started game ("playing") and remembers a table we were watching.
+                    val shown = s.game?.tableID ?: s.joinedTableID
+                    if (shown != null && shown !in w.playingAtTables && shown != watching) {
+                        next = next.copy(
+                            joinedTableID = null, game = null, tableChat = emptyList(), replay = null,
+                            sharedSegment = null, moves = emptyList(), draws = emptyList(),
+                            error = "You were removed from your table when the connection dropped.",
+                        )
+                    }
+                    next
+                }
                 // Rejoin a game we were already playing (e.g. after the app was killed).
                 // The server ties a seat to the websocket that sat down, so we must take it over with
                 // "tableReattend"; it answers with "tableStart", which loads the game.
-                w.playingAtTables.firstOrNull()?.let { id ->
-                    client.send("tableReattend", buildJsonObject { put("tableID", id) })
+                val playing = w.playingAtTables.firstOrNull()
+                if (playing != null) {
+                    client.send("tableReattend", buildJsonObject { put("tableID", playing) })
+                } else if (watching != null) {
+                    // Go back to the game we were watching (the website does the same).
+                    client.send("tableSpectate", buildJsonObject {
+                        put("tableID", watching)
+                        put("shadowingPlayerIndex", w.disconShadowingSeat ?: -1)
+                    })
                 }
             }
             "userList" -> (m.data as? JsonArray)?.let { arr ->

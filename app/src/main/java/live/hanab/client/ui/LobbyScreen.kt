@@ -243,12 +243,13 @@ private fun UsersTab(ui: LobbyUiState, onPm: (String) -> Unit) {
     LazyColumn(Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
         items(users, key = { it.userID }) { u ->
             val bot = live.hanab.client.BotStore.isBot(u.name)
-            Row(
-                Modifier.fillMaxWidth().clickable { menuFor = u.name }.padding(vertical = 10.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-            ) {
+            Column(Modifier.fillMaxWidth().clickable { menuFor = u.name }.padding(vertical = 8.dp)) {
                 Text(u.name + if (bot) "  [BOT]" else "")
-                Text(u.status, style = MaterialTheme.typography.bodySmall)
+                Text(
+                    statusLabel(u, ui),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+                )
             }
         }
         if (offlineBots.isNotEmpty()) {
@@ -303,4 +304,23 @@ private fun PmTab(ui: LobbyUiState, vm: LobbyViewModel) {
             ChatPanel(ui.pms[open].orEmpty(), { vm.sendPm(open, it) })
         }
     }
+}
+
+
+/**
+ * Where a user is, in words. The server sends a number: 0 lobby, 1 pregame, 2 playing, 3 spectating,
+ * 4 replay, 5 shared replay. If they are at a table, its name is added; "(away)" marks an inactive user.
+ */
+private fun statusLabel(u: live.hanab.client.net.User, ui: LobbyUiState): String {
+    val what = when (u.status.trim().toIntOrNull()) {
+        0 -> "In lobby"
+        1 -> "In pregame"
+        2 -> "In game"
+        3 -> "Spectating"
+        4 -> "In replay"
+        5 -> "In shared replay"
+        else -> u.status.ifBlank { "Online" }
+    }
+    val table = u.tableID?.let { ui.tables[it]?.name }?.takeIf { u.status.trim() != "0" }
+    return what + (if (table != null) " - $table" else "") + (if (u.inactive) " (away)" else "")
 }
