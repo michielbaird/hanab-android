@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.IntrinsicSize
@@ -41,6 +42,8 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.material3.FilterChip
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.animation.core.Animatable
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.runtime.getValue
@@ -252,6 +255,8 @@ private fun GameBoard(live: GameState, vm: LobbyViewModel, ui: LobbyUiState) {
     val partners = g.othersInTurnOrder
     var cluePartner by remember(g.turn) { mutableIntStateOf(partners.first()) }
     var clueChoice by remember(g.turn) { mutableStateOf<ClueChoice?>(null) }
+    // Whether the clue panel is open this turn: by itself if the setting is on, otherwise via the Clue button.
+    var showClue by remember(g.turn) { mutableStateOf(AppSettings.autoClue) }
     // Cards the clue being composed would touch (only while composing on our turn).
     val highlighted: Set<Int> = if (!g.ourTurn) emptySet() else clueChoice?.let { c ->
         g.hands[cluePartner].filter { o ->
@@ -270,14 +275,11 @@ private fun GameBoard(live: GameState, vm: LobbyViewModel, ui: LobbyUiState) {
     Box(Modifier.fillMaxSize().onGloballyPositioned { origin = it.positionInRoot() }) {
     Surface(Modifier.fillMaxSize(), color = Color.Transparent, contentColor = MaterialTheme.colorScheme.onBackground) {
         Column(Modifier) {
-            // Pinned: the discard button and the stacks are where cards fly to, so they must stay on screen.
+            // Pinned at the top: the stacks, where played cards land, stay on screen while the hands scroll.
             Column(
                 Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, top = 12.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                Surface(tonalElevation = 2.dp, shape = RoundedCornerShape(10.dp)) {
-                    GameHeader(live, reviewIdx, g, replay, amLeader, follow, { follow = it }, setReview, bounds) { showDiscards = true }
-                }
                 Stacks(g, shownStacks, bounds, pulseSuit)
             }
             Column(
@@ -370,7 +372,14 @@ private fun GameBoard(live: GameState, vm: LobbyViewModel, ui: LobbyUiState) {
                     Text(if (g.phase == Phase.Over) "Back to lobby" else "Leave game")
                 }
             }
-            if (g.ourTurn) CluePanel(g, vm, partners, cluePartner, { cluePartner = it }, clueChoice, { clueChoice = it })
+            if (g.ourTurn && showClue) CluePanel(g, vm, partners, cluePartner, { cluePartner = it }, clueChoice, { clueChoice = it })
+            // Pinned at the bottom, where the thumb is: game info on the left, playback buttons on the right.
+            Surface(Modifier.padding(horizontal = 12.dp, vertical = 8.dp), tonalElevation = 2.dp, shape = RoundedCornerShape(10.dp)) {
+                GameHeader(
+                    live, reviewIdx, g, replay, amLeader, follow, { follow = it }, setReview, bounds,
+                    showClueButton = g.ourTurn, clueOpen = showClue, onToggleClue = { showClue = !showClue },
+                ) { showDiscards = true }
+            }
         }
     }
     flights.toList().forEach { f ->
@@ -773,13 +782,16 @@ private fun Modifier.xOut(on: Boolean): Modifier = if (!on) this else this.drawW
  *  - Middle: the possible suits as symbols on a ring (one large symbol once the suit is certain).
  *  - Bottom: the possible ranks (one large number once the rank is certain).
  *  - A red X over a symbol or number means only deduction (visible cards) rules it out, not a clue.
- *  - A cyan border means deduction alone pins the card down.
+ *  - A suit or rank is shown as certain only when a clue settled it; deduction never collapses the card.
  *  - Top-left: note tag. Top-right: critical "!" or discardable bin.
  */
 @Composable
 private fun KnowledgeCardView(g: GameState, c: Card, k: Knowledge, note: String?) {
-    val solvedSuit = k.inferredSuits.singleOrNull()
-    val solvedRank = k.inferredRanks.singleOrNull()
+    // Only what the CLUES settled is shown as a certain suit / rank. A suit or rank that is merely deduced
+    // keeps all its candidates on show with the ruled-out ones crossed out, so a partner can tell what you
+    // were told apart from what you worked out.
+    val solvedSuit = k.directSuits.singleOrNull()
+    val solvedRank = k.directRanks.singleOrNull()
     val discardable = g.allDead(k.inferred)
     val bg: androidx.compose.ui.graphics.Brush = when {
         solvedSuit == null -> androidx.compose.ui.graphics.SolidColor(Color(0xFF37474F))
@@ -788,7 +800,6 @@ private fun KnowledgeCardView(g: GameState, c: Card, k: Knowledge, note: String?
     }
     val shape = RoundedCornerShape(8.dp)
     val border = when {
-        k.solvedByInference -> BorderStroke(3.dp, Color(0xFF80DEEA))
         c.clued -> BorderStroke(3.dp, Color.White)
         else -> BorderStroke(1.dp, Color(0xFF9E9E9E))
     }
@@ -887,17 +898,54 @@ private fun Modifier.raiseIfClued(clued: Boolean): Modifier {
  * Bubble under a card that the latest clue touched: a colour dot or a rank number. It is shown while
  * the clue is current: from when it is given until the turn after it ends. Because it is derived
  * from the game state, it also appears when stepping through earlier turns in review.
+ *
+ * It draws the eye: the bubble grows from nothing with a springy overshoot (starting a moment later
+ * for each card to the right, so the eye follows along), then sends out two ripples. It animates every
+ * time it enters, in live play and in review alike, and follows the Animation speed setting.
  */
 @Composable
 private fun androidx.compose.foundation.layout.BoxScope.ClueBubbleFor(g: GameState, order: Int) {
     val mark = g.lastClue ?: return
     if (g.turn > mark.turn + 1 || order !in mark.orders) return
+
+    val speed = AppSettings.animSpeed
+    val animate = speed != AnimSpeed.Off
+    // Which touched card this is, left to right in the hand: later cards start slightly later.
+    val position = g.hands.getOrNull(mark.target)?.filter { it in mark.orders }?.indexOf(order)?.coerceAtLeast(0) ?: 0
+    val grow = remember(mark.turn, mark.giver, order) { Animatable(if (animate) 0f else 1f) }
+    val ripple = remember(mark.turn, mark.giver, order) { Animatable(1f) }
+    LaunchedEffect(mark.turn, mark.giver, order, animate) {
+        if (!animate) { grow.snapTo(1f); return@LaunchedEffect }
+        grow.snapTo(0f)
+        kotlinx.coroutines.delay((position * 120 * speed.factor).toLong())
+        grow.animateTo(
+            1f,
+            androidx.compose.animation.core.spring(dampingRatio = 0.4f, stiffness = 170f),
+        )
+        repeat(2) {
+            ripple.snapTo(0f)
+            ripple.animateTo(1f, androidx.compose.animation.core.tween((650 * speed.factor).toInt().coerceAtLeast(1)))
+        }
+    }
+
     val shape = androidx.compose.foundation.shape.CircleShape
     Box(
         Modifier
             .align(Alignment.BottomCenter)
             .offset(y = 11.dp)
             .size(24.dp)
+            .graphicsLayer { scaleX = grow.value; scaleY = grow.value }
+            .drawBehind {
+                // An expanding, fading ring around the bubble.
+                val p = ripple.value
+                if (p < 1f) {
+                    drawCircle(
+                        Color.White.copy(alpha = (1f - p) * 0.7f),
+                        radius = size.minDimension / 2f * (1f + p * 1.1f),
+                        style = androidx.compose.ui.graphics.drawscope.Stroke(width = 2.dp.toPx()),
+                    )
+                }
+            }
             .background(
                 if (mark.color != null) suitBrush(mark.color) else androidx.compose.ui.graphics.SolidColor(Color(0xFF455A64)),
                 shape,
@@ -910,8 +958,7 @@ private fun androidx.compose.foundation.layout.BoxScope.ClueBubbleFor(g: GameSta
         }
         if (mark.color != null) Pip(mark.color, 16.dp)
     }
-}
-/** A small black waste bin, drawn directly so its colour is not decided by the emoji font. */
+}/** A small black waste bin, drawn directly so its colour is not decided by the emoji font. */
 @Composable
 private fun BinIcon(modifier: Modifier, color: Color = Color.Black) {
     androidx.compose.foundation.Canvas(modifier) {
@@ -993,12 +1040,13 @@ private fun Modifier.turnGlow(active: Boolean): Modifier {
 }
 
 /**
- * One compact box with everything about the game state, and the playback arrows spanning both rows:
+ * Everything about the game state in one compact box, pinned to the bottom of the screen:
  *
- *     [<]          turn info (live / reviewing + last move)          [>]
- *     [<]   clues   strikes   deck   score   discards               [>]
+ *     turn info (live / reviewing + last move)
+ *     clues  strikes  deck  score  discards            [<] [>]
  *
- * [<] steps back through earlier turns, [>] forward (past the last one it returns to live play).
+ * [<] steps back one turn and [>] forward one. Long-press [<] to jump to the first turn and [>] to jump
+ * back to the live game, so there is no separate "live" button.
  */
 @Composable
 private fun GameHeader(
@@ -1011,57 +1059,51 @@ private fun GameHeader(
     onFollow: (Boolean) -> Unit,
     onChange: (Int?) -> Unit,
     bounds: MutableMap<String, Rect>,
+    showClueButton: Boolean,
+    clueOpen: Boolean,
+    onToggleClue: () -> Unit,
     onDiscards: () -> Unit,
 ) {
     val g = shown
     val n = live.turnStops.size
     val amber = Color(0xFFFFB300)
-    val backEnabled = n >= 2 && (idx == null || idx > 0)
-    Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min), verticalAlignment = Alignment.CenterVertically) {
-        OutlinedButton(
-            onClick = { onChange(if (idx == null) n - 2 else idx - 1) },
-            enabled = backEnabled,
-            modifier = Modifier.fillMaxHeight().width(40.dp),
-            contentPadding = PaddingValues(0.dp),
-        ) { Text("\u25C0") }
-
-        Column(Modifier.weight(1f).padding(horizontal = 6.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            // ---- row 1: turn info
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                val text = when {
-                    idx != null -> "Turn ${g.turn + 1}/${live.turn + 1} \u00B7 " + (g.log.lastOrNull()?.text ?: "start")
-                    g.phase == Phase.Over -> "Game over"
-                    g.ourTurn -> "Turn ${g.turn + 1} \u00B7 your turn"
-                    else -> "Turn ${g.turn + 1} \u00B7 ${g.name(g.currentPlayer)}"
-                }
-                Text(
-                    (if (replay != null && idx == null) "Replay \u00B7 " else "") + text,
-                    style = MaterialTheme.typography.labelMedium,
-                    color = if (idx != null) amber else Color.Unspecified,
-                    maxLines = 1,
-                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f),
-                )
-                if (replay != null && !amLeader) {
-                    Text(
-                        if (follow) "following \u2713" else "follow",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.clickable { onFollow(!follow) }.padding(horizontal = 6.dp),
-                    )
-                }
-                if (idx != null) {
-                    Text(
-                        "LIVE",
-                        style = MaterialTheme.typography.labelMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.clickable { onChange(null) }.padding(start = 6.dp),
-                    )
-                }
+    Column(Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 6.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        // ---- turn info
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            val text = when {
+                idx != null -> "Turn ${g.turn + 1}/${live.turn + 1} \u00B7 " + (g.log.lastOrNull()?.text ?: "start")
+                g.phase == Phase.Over -> "Game over"
+                g.ourTurn -> "Turn ${g.turn + 1} \u00B7 your turn"
+                else -> "Turn ${g.turn + 1} \u00B7 ${g.name(g.currentPlayer)}"
             }
-            // ---- row 2: clues, strikes, deck, score, discards
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                (if (replay != null && idx == null) "Replay \u00B7 " else "") + text,
+                style = MaterialTheme.typography.labelMedium,
+                color = if (idx != null) amber else Color.Unspecified,
+                maxLines = 1,
+                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
+            )
+            if (showClueButton) {
+                // Opens / closes the clue panel above (it can open by itself: see Settings).
+                androidx.compose.material3.FilledTonalButton(
+                    onClick = onToggleClue,
+                    modifier = Modifier.height(30.dp),
+                    contentPadding = PaddingValues(horizontal = 14.dp),
+                ) { Text(if (clueOpen) "Clue \u25BC" else "Clue \u25B2", fontSize = 13.sp) }
+            }
+            if (replay != null && !amLeader) {
+                Text(
+                    if (follow) "following \u2713" else "follow",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.clickable { onFollow(!follow) }.padding(horizontal = 6.dp),
+                )
+            }
+        }
+        // ---- widgets on the left, playback buttons on the right
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Row(Modifier.weight(1f), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                 // clues: a token with the number
                 Box(
                     Modifier.size(24.dp).background(if (g.clues == 0) Color(0xFFD32F2F) else Color(0xFF1976D2), androidx.compose.foundation.shape.CircleShape),
@@ -1089,20 +1131,43 @@ private fun GameHeader(
                 // discard pile: a bin with the count
                 OutlinedButton(
                     onClick = onDiscards,
-                    modifier = Modifier.height(30.dp).onGloballyPositioned { bounds["discards"] = it.boundsInRoot() },
+                    modifier = Modifier.height(32.dp).onGloballyPositioned { bounds["discards"] = it.boundsInRoot() },
                     contentPadding = PaddingValues(horizontal = 8.dp),
                 ) {
                     BinIcon(Modifier.size(13.dp), MaterialTheme.colorScheme.onSurface)
                     Text(" ${g.discards.size}", fontSize = 13.sp)
                 }
             }
+            Spacer(Modifier.width(10.dp))
+            NavButton("\u25C0", enabled = n >= 2 && (idx == null || idx > 0),
+                onClick = { onChange(if (idx == null) n - 2 else idx - 1) },
+                onLongClick = { onChange(0) })          // first turn
+            Spacer(Modifier.width(6.dp))
+            NavButton("\u25B6", enabled = idx != null,
+                onClick = { onChange(if (idx!! + 1 >= n - 1) null else idx + 1) },
+                onLongClick = { onChange(null) })       // back to the live game
         }
-
-        OutlinedButton(
-            onClick = { onChange(if (idx!! + 1 >= n - 1) null else idx + 1) },
-            enabled = idx != null,
-            modifier = Modifier.fillMaxHeight().width(40.dp),
-            contentPadding = PaddingValues(0.dp),
-        ) { Text("\u25B6") }
     }
+}
+
+/** An outlined button that also reacts to a long press (with a small buzz). */
+@Composable
+private fun NavButton(label: String, enabled: Boolean, onClick: () -> Unit, onLongClick: () -> Unit) {
+    val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
+    val shape = RoundedCornerShape(10.dp)
+    val alpha = if (enabled) 1f else 0.35f
+    val ink = MaterialTheme.colorScheme.onSurface.copy(alpha = alpha)
+    Box(
+        Modifier.height(40.dp).width(48.dp)
+            .border(1.dp, ink.copy(alpha = alpha * 0.6f), shape)
+            .combinedClickable(
+                enabled = enabled,
+                onClick = onClick,
+                onLongClick = {
+                    haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
+                    onLongClick()
+                },
+            ),
+        contentAlignment = Alignment.Center,
+    ) { Text(label, color = ink) }
 }

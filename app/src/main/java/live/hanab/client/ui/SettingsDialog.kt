@@ -33,6 +33,7 @@ fun SettingsDialog(onDismiss: () -> Unit) {
         title = { Text("Settings") },
         text = {
             Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                SwitchRow("Open clue panel on my turn", AppSettings.autoClue, AppSettings::changeAutoClue)
                 SwitchRow("Fireworks background", AppSettings.backdrop, AppSettings::changeBackdrop)
                 SwitchRow("Suit symbols", AppSettings.pips, AppSettings::changePips)
                 SwitchRow("Colour-blind colours", AppSettings.colorblind, AppSettings::changeColorblind)
