@@ -22,11 +22,13 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -247,7 +249,13 @@ private fun GameBoard(live: GameState, vm: LobbyViewModel, ui: LobbyUiState) {
         vm.consumeMoves(moves.last().id)
     }
     var selected by remember { mutableStateOf<Int?>(null) }   // own card order awaiting play/discard
-    var noteFor by remember { mutableStateOf<Int?>(null) }    // card order whose note is being edited
+    var noteFor by remember { mutableStateOf<Int?>(null) }    // card order whose notes screen is open
+    val myName = ui.me?.username
+    // The server takes notes only while the game is running: not in a replay, and not once the game has ended.
+    val canEditNotes = ui.replay == null && live.phase == Phase.Playing
+    fun othersNotes(o: Int) = g.allNotes[o].orEmpty().count { it.text.isNotBlank() && !it.name.equals(myName, ignoreCase = true) }
+    // With nothing else to do on a tap (replays, watching), a tap opens the notes screen; long-press always does.
+    val tapOpensNotes = g.spectating || g.revealAll
     var showDiscards by remember { mutableStateOf(false) }
     // A play/discard that needs a second "are you sure": (order, isPlay, explanation).
     var warn by remember { mutableStateOf<Triple<Int, Boolean, String>?>(null) }
@@ -313,9 +321,9 @@ private fun GameBoard(live: GameState, vm: LobbyViewModel, ui: LobbyUiState) {
                                             .background(if (hl) Color(0xFFFFEB3B) else Color.Transparent, RoundedCornerShape(11.dp))
                                             .padding(3.dp)
                                             .onGloballyPositioned { bounds["card:$o"] = it.boundsInRoot() }
-                                            .combinedClickable(onClick = {}, onLongClick = { noteFor = o }),
+                                            .combinedClickable(onClick = { if (tapOpensNotes) noteFor = o }, onLongClick = { noteFor = o }),
                                     ) {
-                                        CardView(g, c, known = true, note = g.notes[o], knowledge = kn?.get(o))
+                                        CardView(g, c, known = true, note = g.notes[o], knowledge = kn?.get(o), others = othersNotes(o))
                                         ClueBubbleFor(g, o)
                                     }
                                 }
@@ -351,11 +359,11 @@ private fun GameBoard(live: GameState, vm: LobbyViewModel, ui: LobbyUiState) {
                             g.cards[o]?.let { c ->
                                 Box(
                                     Modifier.animateItem(fadeOutSpec = null).alpha(if (o in arriving || o in pendingDraws) 0f else 1f).raiseIfClued(c.clued).onGloballyPositioned { bounds["card:$o"] = it.boundsInRoot() }.combinedClickable(
-                                        onClick = { if (g.ourTurn) selected = o },
+                                        onClick = { if (g.ourTurn) selected = o else if (tapOpensNotes) noteFor = o },
                                         onLongClick = { noteFor = o },
                                     ),
                                 ) {
-                                    CardView(g, c, known = g.spectating || g.revealAll, note = g.notes[o], knowledge = myKn?.get(o))
+                                    CardView(g, c, known = g.spectating || g.revealAll, note = g.notes[o], knowledge = myKn?.get(o), others = othersNotes(o))
                                     ClueBubbleFor(g, o)
                                 }
                             }
@@ -401,7 +409,7 @@ private fun GameBoard(live: GameState, vm: LobbyViewModel, ui: LobbyUiState) {
     if (showDiscards) DiscardDialog(g) { showDiscards = false }
     AnalysisDialog(ui, vm)
     noteFor?.let { order ->
-        NoteDialog(g, order, onSave = { vm.setNote(order, it); noteFor = null }, onDismiss = { noteFor = null })
+        NotesDialog(g, order, myName, canEditNotes, onSave = { vm.setNote(order, it); noteFor = null }, onDismiss = { noteFor = null })
     }
 
     warn?.let { (order, isPlay, text) ->
@@ -640,9 +648,9 @@ private fun Stacks(g: GameState, shown: List<Int>, bounds: MutableMap<String, Re
  * the clues have narrowed it down to.
  */
 @Composable
-private fun CardView(g: GameState, c: Card, known: Boolean, note: String? = null, knowledge: Knowledge? = null) {
+private fun CardView(g: GameState, c: Card, known: Boolean, note: String? = null, knowledge: Knowledge? = null, others: Int = 0) {
     if (knowledge != null) {
-        KnowledgeCardView(g, c, knowledge, note)
+        KnowledgeCardView(g, c, knowledge, note, others)
         return
     }
     val dead = g.isDead(c)
@@ -678,6 +686,7 @@ private fun CardView(g: GameState, c: Card, known: Boolean, note: String? = null
                     .background(Color(0xFFFFEB3B), RoundedCornerShape(3.dp)).padding(horizontal = 2.dp),
             )
         }
+        OthersNotesBadge(others, Modifier.align(Alignment.BottomEnd))
         if (knownSuit >= 0) Pip(g.suits[knownSuit], 16.dp, Modifier.align(Alignment.TopCenter).padding(top = 4.dp))
         CardBadges(g.allCritical(realId), g.allDead(realId), Modifier.align(Alignment.BottomStart))
         if (known && g.isPlayable(c)) {
@@ -740,24 +749,97 @@ private fun DiscardDialog(g: GameState, onDismiss: () -> Unit) {
     )
 }
 
+/** A small bubble with a count, hanging off a card's corner when other people have written notes on it. */
 @Composable
-private fun NoteDialog(g: GameState, order: Int, onSave: (String) -> Unit, onDismiss: () -> Unit) {
-    var text by remember(order) { mutableStateOf(g.notes[order] ?: "") }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Note") },
-        text = {
-            OutlinedTextField(
-                value = text, onValueChange = { text = it },
-                placeholder = { Text("e.g. r5, chop, f") },
-                modifier = Modifier.fillMaxWidth(),
-            )
-        },
-        confirmButton = { Button(onClick = { onSave(text) }) { Text("Save") } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
-    )
+private fun OthersNotesBadge(count: Int, modifier: Modifier) {
+    if (count <= 0) return
+    Box(
+        modifier.offset(x = 3.dp, y = 3.dp).height(16.dp).widthIn(min = 16.dp)
+            .background(Color(0xFFECEFF1), RoundedCornerShape(8.dp))
+            .border(1.dp, Color(0xFF607D8B), RoundedCornerShape(8.dp))
+            .padding(horizontal = 4.dp),
+        contentAlignment = Alignment.Center,
+    ) { Text("$count", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color.Black) }
 }
 
+/**
+ * Notes on one card: your own note (editable while the game runs) and everyone else's, grouped by
+ * person with their name and whether they were a player or a spectator. In a replay or after a game the
+ * server accepts no new notes, so the screen is read-only. Notes are not saved per turn: stepping back
+ * through earlier turns shows the same notes.
+ */
+@Composable
+private fun NotesDialog(g: GameState, order: Int, me: String?, canEdit: Boolean, onSave: (String) -> Unit, onDismiss: () -> Unit) {
+    var text by remember(order) { mutableStateOf(g.notes[order] ?: "") }
+    val others = g.allNotes[order].orEmpty().filter { it.text.isNotBlank() && !it.name.equals(me, ignoreCase = true) }
+    val mine = g.notes[order].orEmpty()
+    val card = g.cards[order]
+    val known = card != null && card.suit in g.suits.indices && card.rank in 1..5
+    val holder = g.hands.indexOfFirst { order in it }
+    val where = when {
+        holder >= 0 -> "${g.name(holder)}'s hand, slot ${g.hands[holder].indexOf(order) + 1}"
+        order in g.discards -> "In the discard pile"
+        else -> "Played"
+    }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                if (known && card != null) {
+                    val suit = g.suits[card.suit]
+                    Box(
+                        Modifier.width(34.dp).height(46.dp).background(suitBrush(suit), RoundedCornerShape(6.dp))
+                            .border(1.5.dp, Color.White, RoundedCornerShape(6.dp)),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Pip(suit, 14.dp, Modifier.align(Alignment.TopCenter).padding(top = 2.dp))
+                        OutlinedText("${card.rank}", 20.sp, Modifier.align(Alignment.BottomCenter))
+                    }
+                }
+                Column {
+                    Text(if (known && card != null) "${g.suits[card.suit]} ${card.rank}" else "Card", style = MaterialTheme.typography.titleMedium)
+                    Text(where, style = MaterialTheme.typography.bodySmall)
+                }
+            }
+        },
+        text = {
+            Column(Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                if (canEdit) {
+                    Text("Your note", style = MaterialTheme.typography.labelLarge)
+                    OutlinedTextField(
+                        value = text, onValueChange = { text = it },
+                        placeholder = { Text("e.g. r5, chop, f") },
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                } else if (mine.isNotBlank()) {
+                    Text("Your note", style = MaterialTheme.typography.labelLarge)
+                    Text(mine)
+                }
+                others.forEach { n ->
+                    Column {
+                        Text(
+                            n.name + if (n.isSpectator) "  (spectator)" else "  (player)",
+                            style = MaterialTheme.typography.labelLarge,
+                        )
+                        Text(n.text)
+                    }
+                }
+                if (others.isEmpty() && !canEdit && mine.isBlank()) Text("No notes on this card.")
+                if (!canEdit) {
+                    Text(
+                        "Notes can't be added in a replay or after the game has ended.",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            if (canEdit) Button(onClick = { onSave(text) }) { Text("Save") }
+            else TextButton(onClick = onDismiss) { Text("Close") }
+        },
+        dismissButton = { if (canEdit) TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
+}
 @Composable
 private fun InfoToggle(label: String, on: Boolean, onClick: () -> Unit) {
     FilterChip(
@@ -786,7 +868,7 @@ private fun Modifier.xOut(on: Boolean): Modifier = if (!on) this else this.drawW
  *  - Top-left: note tag. Top-right: critical "!" or discardable bin.
  */
 @Composable
-private fun KnowledgeCardView(g: GameState, c: Card, k: Knowledge, note: String?) {
+private fun KnowledgeCardView(g: GameState, c: Card, k: Knowledge, note: String?, others: Int = 0) {
     // Only what the CLUES settled is shown as a certain suit / rank. A suit or rank that is merely deduced
     // keeps all its candidates on show with the ruled-out ones crossed out, so a partner can tell what you
     // were told apart from what you worked out.
@@ -861,6 +943,7 @@ private fun KnowledgeCardView(g: GameState, c: Card, k: Knowledge, note: String?
                     .background(Color(0xFFFFEB3B), RoundedCornerShape(3.dp)).padding(horizontal = 2.dp),
             )
         }
+        OthersNotesBadge(others, Modifier.align(Alignment.BottomEnd))
     }
 }
 /**

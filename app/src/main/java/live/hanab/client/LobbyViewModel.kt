@@ -23,6 +23,7 @@ import live.hanab.client.ui.PipSettings
 import live.hanab.client.ui.PipStore
 import live.hanab.client.game.GameState
 import live.hanab.client.game.MoveEvent
+import live.hanab.client.game.NoteEntry
 import live.hanab.client.game.Variants
 import live.hanab.client.net.ChatList
 import live.hanab.client.net.PmHistory
@@ -639,6 +640,40 @@ class LobbyViewModel(app: Application) : AndroidViewModel(app) {
                         )
                     }
                     playSoundsFor(type)
+                }
+            }
+            // Everyone's notes: sent to spectators and in replays (also when a game ends), and a live
+            // per-card update while watching. Players only ever receive their own ("noteListPlayer").
+            "noteList" -> (m.data as? JsonObject)?.get("notes")?.let { arr ->
+                val me = _ui.value.me?.username
+                val authors = (arr as? JsonArray).orEmpty().mapNotNull { e ->
+                    val o = e as? JsonObject ?: return@mapNotNull null
+                    val name = o["name"]?.jsonPrimitive?.content ?: return@mapNotNull null
+                    val texts = (o["notes"] as? JsonArray).orEmpty().map { it.jsonPrimitive.content }
+                    Triple(name, texts, (o["isSpectator"] as? JsonPrimitive)?.content == "true")
+                }
+                _ui.update { s ->
+                    var g = s.game?.withAllNotes(authors)
+                    // Our own notes also drive the yellow tag on the card.
+                    authors.firstOrNull { it.first.equals(me, ignoreCase = true) }?.let { mine -> g = g?.withNotes(mine.second) }
+                    s.copy(game = g)
+                }
+            }
+            "note" -> (m.data as? JsonObject)?.let { d ->
+                val me = _ui.value.me?.username
+                val order = d["order"]?.jsonPrimitive?.intOrNull ?: return@let
+                val entries = (d["notes"] as? JsonArray).orEmpty().mapNotNull { e ->
+                    val o = e as? JsonObject ?: return@mapNotNull null
+                    NoteEntry(
+                        o["name"]?.jsonPrimitive?.content ?: return@mapNotNull null,
+                        o["text"]?.jsonPrimitive?.content.orEmpty(),
+                        (o["isSpectator"] as? JsonPrimitive)?.content == "true",
+                    )
+                }
+                _ui.update { s ->
+                    var g = s.game?.withCardNotes(order, entries)
+                    entries.firstOrNull { it.name.equals(me, ignoreCase = true) }?.let { mine -> g = g?.withNote(order, mine.text) }
+                    s.copy(game = g)
                 }
             }
             "noteListPlayer" -> (m.data as? JsonObject)?.get("notes")?.let { n ->

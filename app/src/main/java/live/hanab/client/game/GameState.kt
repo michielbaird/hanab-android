@@ -25,6 +25,9 @@ data class Card(
 
 data class LogLine(val text: String)
 
+/** One person's note on a card. Notes are per person: players and spectators each keep their own. */
+data class NoteEntry(val name: String, val text: String, val isSpectator: Boolean)
+
 /** The most recent clue: which cards it touched and what was said. Shown as a bubble for one turn. */
 data class ClueMark(
     val orders: Set<Int>,
@@ -101,6 +104,8 @@ data class GameState(
     /** True for a rebuilt past position: no moves may be made from it. */
     val readOnly: Boolean = false,
     val lastClue: ClueMark? = null,
+    /** Everyone's notes by card order, as the server sends them to spectators and in replays. */
+    val allNotes: Map<Int, List<NoteEntry>> = emptyMap(),
     /** True identities of every card (index = card order), sent once the game is a replay. */
     val identities: List<Pair<Int, Int>> = emptyList(),
     /** After the game ends every card, including our own, is visible. */
@@ -168,15 +173,26 @@ data class GameState(
         if (next === this) this else next.copy(actions = actions + a)
     }
 
-    /** Positions worth stopping at when stepping back: right after each "turn" action. */
+    /**
+     * Positions worth stopping at when stepping back, as a number of actions to replay.
+     *  - the starting position: the initial deal, before any clue, play or discard. The server sends no
+     *    "turn" action for it, so it is found as the point just before the first move;
+     *  - then the position right after each "turn" action (the server sends one after every move).
+     * Stop number k is therefore the game after k moves, which is also the shared replay's segment k.
+     */
     val turnStops: List<Int> by lazy {
-        actions.mapIndexedNotNull { i, a -> if (a["type"]?.jsonPrimitive?.content == "turn") i + 1 else null }
+        val firstMove = actions.indexOfFirst {
+            val type = it["type"]?.jsonPrimitive?.content
+            type == "clue" || type == "play" || type == "discard"
+        }
+        val afterTurns = actions.mapIndexedNotNull { i, a -> if (a["type"]?.jsonPrimitive?.content == "turn") i + 1 else null }
+        ((if (firstMove >= 0) listOf(firstMove) else emptyList()) + afterTurns).distinct()
     }
 
     /** The game as it was after the first [k] actions (read-only). */
     fun replayTo(k: Int): GameState {
         val blank = GameState(tableID, playerNames, ourIndex, spectating, variantName, suits)
-        val past = blank.applyAll(actions.take(k)).copy(actions = actions, notes = notes, readOnly = true)
+        val past = blank.applyAll(actions.take(k)).copy(actions = actions, notes = notes, allNotes = allNotes, readOnly = true)
         return if (revealAll) past.withIdentities(identities) else past
     }
 
@@ -316,6 +332,23 @@ data class GameState(
     /** "Red 3", or "a card" if [ids] is not a single identity. */
     fun describe(ids: Set<Pair<Int, Int>>): String =
         ids.singleOrNull()?.let { (s, r) -> "${suits.getOrElse(s) { "?" }} $r" } ?: "this card"
+
+    /** Replace everyone's notes (the server's full "noteList"). */
+    fun withAllNotes(authors: List<Triple<String, List<String>, Boolean>>): GameState {
+        val byCard = HashMap<Int, MutableList<NoteEntry>>()
+        for ((name, texts, isSpectator) in authors) {
+            texts.forEachIndexed { order, text ->
+                if (text.isNotBlank()) byCard.getOrPut(order) { ArrayList() } += NoteEntry(name, text, isSpectator)
+            }
+        }
+        return copy(allNotes = byCard)
+    }
+
+    /** Replace everyone's notes on one card (the server's live "note" update to spectators). */
+    fun withCardNotes(order: Int, entries: List<NoteEntry>): GameState {
+        val shown = entries.filter { it.text.isNotBlank() }
+        return copy(allNotes = if (shown.isEmpty()) allNotes - order else allNotes + (order to shown))
+    }
 
     fun withNotes(list: List<String>) =
         copy(notes = list.mapIndexedNotNull { order, t -> if (t.isBlank()) null else order to t }.toMap())

@@ -2,6 +2,7 @@ package live.hanab.client
 
 import kotlinx.serialization.json.JsonObject
 import live.hanab.client.game.GameState
+import live.hanab.client.game.NoteEntry
 import live.hanab.client.net.HanabJson
 import live.hanab.client.net.unpack
 import org.junit.Assert.assertEquals
@@ -190,4 +191,46 @@ class GameStateTest {
         val k = g.knowledgeOf(0).getValue(0)
         // Player a was told "5", and can see b's yellow 5: their card must be the red 5.
         assertEquals(setOf(0 to 5), k.inferred)
+    }
+    @Test fun everyonesNotesAreKeptPerCard() {
+        val g = GameState(
+            tableID = 1, playerNames = listOf("a", "b"), ourIndex = 0, spectating = false,
+            variantName = "No Variant", suits = listOf("Red", "Yellow", "Green", "Blue", "Purple"),
+        )
+        // The server's "noteList": one entry per person, each with a text per card order.
+        val all = g.withAllNotes(
+            listOf(
+                Triple("a", listOf("", "r5", ""), false),
+                Triple("b", listOf("chop", "", ""), false),
+                Triple("watcher", listOf("", "r5?", "dead"), true),
+            ),
+        )
+        assertEquals(listOf("b"), all.allNotes[0]!!.map { it.name })
+        assertEquals(setOf("a", "watcher"), all.allNotes[1]!!.map { it.name }.toSet())
+        assertEquals(true, all.allNotes[2]!!.single().isSpectator)
+        // A live per-card update replaces that card's notes only; blank ones are dropped.
+        val updated = all.withCardNotes(1, listOf(NoteEntry("a", "", false), NoteEntry("watcher", "no, y5", true)))
+        assertEquals(listOf("watcher"), updated.allNotes[1]!!.map { it.name })
+        assertEquals(listOf("b"), updated.allNotes[0]!!.map { it.name })
+    }
+    /** Turn 1 (no clues or plays yet) can be stepped back to: the server sends no "turn" action for it. */
+    @Test fun startingPositionIsAStop() {
+        var g = start()   // the deal: draws only
+        g = g.apply(j("""{"type":"status","clues":8,"score":0,"maxScore":10}"""))
+        g = g.apply(j("""{"type":"clue","clue":{"type":1,"value":1},"giver":0,"list":[4],"target":1,"ignoreNegative":false}"""))
+        g = g.apply(j("""{"type":"status","clues":7,"score":0,"maxScore":10}"""))
+        g = g.apply(j("""{"type":"turn","num":1,"currentPlayerIndex":1}"""))
+        g = g.apply(j("""{"type":"play","playerIndex":1,"order":4,"suitIndex":0,"rank":1}"""))
+        g = g.apply(j("""{"type":"draw","playerIndex":1,"order":8,"suitIndex":0,"rank":2}"""))
+        g = g.apply(j("""{"type":"status","clues":7,"score":1,"maxScore":10}"""))
+        g = g.apply(j("""{"type":"turn","num":2,"currentPlayerIndex":0}"""))
+        // stops: the start, after move 1, after move 2
+        assertEquals(3, g.turnStops.size)
+        val start = g.replayTo(g.turnStops[0])
+        assertEquals(0, start.turn)                              // "Turn 1"
+        assertEquals(8, start.clues)                             // no clue given yet
+        assertEquals(0, start.stacks[0])                         // nothing played
+        assertEquals(null, start.lastClue)                       // and no clue bubble
+        assertEquals(4, start.hands[1].size)                     // everybody still holds their dealt cards
+        assertEquals(1, g.replayTo(g.turnStops[1]).turn)         // after the first move
     }}
