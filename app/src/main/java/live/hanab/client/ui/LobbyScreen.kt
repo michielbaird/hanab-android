@@ -39,6 +39,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import live.hanab.client.LobbyUiState
@@ -93,12 +94,29 @@ fun LobbyScreen(ui: LobbyUiState, vm: LobbyViewModel) {
 @Composable
 private fun TablesTab(ui: LobbyUiState, vm: LobbyViewModel) {
     var creating by remember { mutableStateOf(false) }
-    val tables = ui.tables.values.sortedWith(compareBy<Table> { it.running }.thenByDescending { it.id })
+    val all = ui.tables.values.sortedWith(compareBy<Table> { it.running }.thenByDescending { it.id })
+    // A table in a variant this app cannot play is not offered; the footer says how many are hidden.
+    val unsupported = all.filter { !Variants.isSupported(it.variant) && !it.joined }
+    val tables = if (live.hanab.client.AppSettings.showUnsupported) all else all - unsupported.toSet()
     Column(Modifier.fillMaxSize()) {
         Button(onClick = { creating = true }, modifier = Modifier.fillMaxWidth().padding(12.dp)) { Text("New table") }
-        if (tables.isEmpty()) Text("No tables right now.", Modifier.padding(16.dp))
+        if (tables.isEmpty() && unsupported.isEmpty()) Text("No tables right now.", Modifier.padding(16.dp))
         LazyColumn(Modifier.weight(1f)) {
-            items(tables, key = { it.id }) { t -> TableRow(t, vm) }
+            items(tables, key = { it.id }) { t -> TableRow(t, vm, supported = Variants.isSupported(t.variant) || t.joined) }
+            if (unsupported.isNotEmpty()) {
+                item {
+                    Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            "${unsupported.size} table${if (unsupported.size == 1) "" else "s"} in variants not supported on mobile",
+                            style = MaterialTheme.typography.bodySmall,
+                            modifier = Modifier.weight(1f),
+                        )
+                        TextButton(onClick = { live.hanab.client.AppSettings.changeShowUnsupported(!live.hanab.client.AppSettings.showUnsupported) }) {
+                            Text(if (live.hanab.client.AppSettings.showUnsupported) "Hide" else "Show")
+                        }
+                    }
+                }
+            }
         }
     }
     if (creating) CreateTableDialog(ui, vm) { creating = false }
@@ -107,65 +125,29 @@ private fun TablesTab(ui: LobbyUiState, vm: LobbyViewModel) {
 @Composable
 private fun CreateTableDialog(ui: LobbyUiState, vm: LobbyViewModel, onDismiss: () -> Unit) {
     var name by remember { mutableStateOf(ui.me?.randomTableName ?: "") }
-    var variant by remember { mutableStateOf(Variants.quick.first()) }
+    var opts by remember { mutableStateOf(live.hanab.client.net.TableOpts(variantName = Variants.quick.first())) }
     var maxPlayers by remember { mutableIntStateOf(5) }
     var password by remember { mutableStateOf(live.hanab.client.AppSettings.lastPassword) }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("New table") },
         text = {
-            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedTextField(value = name, onValueChange = { name = it }, label = { Text("Name") }, singleLine = true)
-                Text("Variant", style = MaterialTheme.typography.labelMedium)
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Variants.quick.forEach { v ->
-                        FilterChip(selected = variant == v, onClick = { variant = v }, label = { Text(v) })
-                    }
-                }
-                var query by remember { mutableStateOf("") }
-                OutlinedTextField(
-                    value = query,
-                    onValueChange = { query = it },
-                    label = { Text(if (variant in Variants.quick) "Search other variants" else "Selected: $variant") },
-                    singleLine = true,
-                )
-                if (query.length >= 2) {
-                    val matches = remember(query) {
-                        Variants.allSupported().filter { it.contains(query, ignoreCase = true) }.take(8)
-                    }
-                    FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        matches.forEach { v ->
-                            FilterChip(selected = variant == v, onClick = { variant = v; query = "" }, label = { Text(v) })
-                        }
-                    }
-                    if (matches.isEmpty()) Text("No supported variant matches.", style = MaterialTheme.typography.bodySmall)
-                }
-                OutlinedTextField(
-                    value = password,
-                    onValueChange = { password = it },
-                    label = { Text("Password (optional)") },
-                    singleLine = true,
-                )
-                Text("Max players", style = MaterialTheme.typography.labelMedium)
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    (2..5).forEach { n ->
-                        FilterChip(selected = maxPlayers == n, onClick = { maxPlayers = n }, label = { Text("$n") })
-                    }
-                }
-            }
+            TableForm(
+                name, { name = it }, opts, { opts = it }, maxPlayers, { maxPlayers = it },
+                password = password, onPassword = { password = it },
+            )
         },
         confirmButton = {
-            TextButton(onClick = { vm.createTable(name, variant, maxPlayers, password); onDismiss() }) { Text("Create") }
+            TextButton(onClick = { vm.createTable(name, opts, maxPlayers, password); onDismiss() }) { Text("Create") }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )
 }
-
 @Composable
-private fun TableRow(t: Table, vm: LobbyViewModel) {
+private fun TableRow(t: Table, vm: LobbyViewModel, supported: Boolean = true) {
     var askPassword by remember { mutableStateOf(false) }
     var password by remember { mutableStateOf(live.hanab.client.AppSettings.lastPassword) }
-    Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp)) {
+    Column(Modifier.fillMaxWidth().alpha(if (supported) 1f else 0.55f).padding(horizontal = 16.dp, vertical = 10.dp)) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
                 Text(t.name, style = MaterialTheme.typography.titleSmall)
@@ -176,11 +158,19 @@ private fun TableRow(t: Table, vm: LobbyViewModel) {
                     style = MaterialTheme.typography.bodySmall,
                 )
                 Text(t.players.joinToString(", "), style = MaterialTheme.typography.bodySmall)
+                if (!supported) {
+                    Text(
+                        "Not supported on mobile - play this variant on the website",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Color(0xFFFFB300),
+                    )
+                }
             }
-            if (t.running && !t.joined) {
+            // No Join / Watch for a variant the app cannot play: its clue and card logic would be wrong.
+            if (supported && t.running && !t.joined) {
                 OutlinedButton(onClick = { vm.spectateTable(t.id) }) { Text(if (t.sharedReplay) "Replay" else "Watch") }
             }
-            if (!t.running && !t.joined) {
+            if (supported && !t.running && !t.joined) {
                 Button(onClick = { if (t.passwordProtected) askPassword = !askPassword else vm.joinTable(t.id) }) {
                     Text("Join")
                 }

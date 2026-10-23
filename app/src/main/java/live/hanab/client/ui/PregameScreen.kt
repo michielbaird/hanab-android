@@ -36,6 +36,7 @@ fun PregameScreen(ui: LobbyUiState, vm: LobbyViewModel) {
     val isOwner = table != null && table.ownerID == ui.me?.userID
     var showInvite by remember { mutableStateOf(false) }
     var setAll by remember { mutableStateOf(false) }
+    var showEdit by remember { mutableStateOf(false) }
 
     val players = table?.players.orEmpty()
     val botsAtTable = players.filter { BotStore.isBot(it) }
@@ -52,6 +53,11 @@ fun PregameScreen(ui: LobbyUiState, vm: LobbyViewModel) {
             ) {
                 Text(table?.name ?: "Table", style = MaterialTheme.typography.headlineSmall)
                 Text("${table?.variant ?: ""} - ${table?.numPlayers ?: 0}/${table?.maxPlayers ?: 0} players")
+                table?.options?.activeLabels?.takeIf { it.isNotEmpty() }?.let {
+                    Text(it.joinToString(", "), style = MaterialTheme.typography.bodySmall)
+                }
+                // Only the table owner can change the game; the server refuses anyone else.
+                if (isOwner) OutlinedButton(onClick = { showEdit = true }, modifier = Modifier.fillMaxWidth()) { Text("Edit game") }
                 players.forEach { p ->
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(
@@ -108,4 +114,29 @@ fun PregameScreen(ui: LobbyUiState, vm: LobbyViewModel) {
         )
     }
     if (setAll) SetAllBotsDialog(onSet = vm::setAllBots, onDismiss = { setAll = false })
+    if (showEdit && table != null) {
+        var name by remember(table.id) { mutableStateOf(table.name) }
+        var opts by remember(table.id) { mutableStateOf(table.options.copy(variantName = table.variant.ifBlank { table.options.variantName })) }
+        var maxPlayers by remember(table.id) { mutableStateOf(table.maxPlayers.coerceIn(2, 6)) }
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { showEdit = false },
+            title = { Text("Edit game") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    TableForm(name, { name = it }, opts, { opts = it }, maxPlayers, { maxPlayers = it })
+                    if (maxPlayers < table.numPlayers) {
+                        Text(
+                            "Players over the new limit are removed from the table.",
+                            color = MaterialTheme.colorScheme.error,
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                Button(onClick = { vm.updateTable(name, opts, maxPlayers); showEdit = false }) { Text("Save") }
+            },
+            dismissButton = { TextButton(onClick = { showEdit = false }) { Text("Cancel") } },
+        )
+    }
 }

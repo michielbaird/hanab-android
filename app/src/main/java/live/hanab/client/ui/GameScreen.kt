@@ -150,6 +150,11 @@ fun GameScreen(ui: LobbyUiState, g: GameState, vm: LobbyViewModel) {
         val scale = if (wide && maxHeight >= 600.dp) 1.25f else 1f
         Surface(Modifier.fillMaxSize(), color = Color.Transparent, contentColor = MaterialTheme.colorScheme.onBackground) {
             Column(Modifier.safeDrawingPadding()) {
+                ui.error?.let { err ->
+                    // Gone after a few seconds, or when tapped.
+                    LaunchedEffect(err) { kotlinx.coroutines.delay(6_000); vm.clearError() }
+                    ErrorBanner(err, vm::clearError)
+                }
                 if (wide) {
                     Row(Modifier.fillMaxSize()) {
                         Box(Modifier.weight(1.5f)) {
@@ -257,6 +262,7 @@ private fun GameBoard(live: GameState, vm: LobbyViewModel, ui: LobbyUiState) {
     // With nothing else to do on a tap (replays, watching), a tap opens the notes screen; long-press always does.
     val tapOpensNotes = g.spectating || g.revealAll
     var showDiscards by remember { mutableStateOf(false) }
+    var confirmDeck by remember { mutableStateOf(false) }
     // A play/discard that needs a second "are you sure": (order, isPlay, explanation).
     var warn by remember { mutableStateOf<Triple<Int, Boolean, String>?>(null) }
     var infoOn by remember { mutableStateOf(setOf<Int>()) }   // players whose hand shows deduced knowledge
@@ -303,6 +309,7 @@ private fun GameBoard(live: GameState, vm: LobbyViewModel, ui: LobbyUiState) {
                                 style = MaterialTheme.typography.titleSmall,
                                 modifier = Modifier.weight(1f),
                             )
+                            CharacterTag(g.characters.getOrNull(p))
                             InfoToggle("What they know", p in infoOn) { toggleInfo(p) }
                         }
                         LazyRow(
@@ -347,6 +354,7 @@ private fun GameBoard(live: GameState, vm: LobbyViewModel, ui: LobbyUiState) {
                             color = if (g.ourTurn) MaterialTheme.colorScheme.primary else Color.Unspecified,
                             modifier = Modifier.weight(1f),
                         )
+                        CharacterTag(g.characters.getOrNull(g.ourIndex))
                         if (g.spectating) InfoToggle("What they know", g.ourIndex in infoOn) { toggleInfo(g.ourIndex) }
                         else if (g.revealAll) InfoToggle("What I knew", g.ourIndex in infoOn) { toggleInfo(g.ourIndex) }
                     }
@@ -386,6 +394,7 @@ private fun GameBoard(live: GameState, vm: LobbyViewModel, ui: LobbyUiState) {
                 GameHeader(
                     live, reviewIdx, g, replay, amLeader, follow, { follow = it }, setReview, bounds,
                     showClueButton = g.ourTurn, clueOpen = showClue, onToggleClue = { showClue = !showClue },
+                    deckPlayable = g.deckPlayable, onDeckPlay = { confirmDeck = true },
                 ) { showDiscards = true }
             }
         }
@@ -407,6 +416,19 @@ private fun GameBoard(live: GameState, vm: LobbyViewModel, ui: LobbyUiState) {
     }
 
     if (showDiscards) DiscardDialog(g) { showDiscards = false }
+    if (confirmDeck) {
+        AlertDialog(
+            onDismissRequest = { confirmDeck = false },
+            title = { Text("Play the last card?") },
+            text = { Text("This plays the last card of the deck without seeing it. If it can't be played it is a strike.") },
+            confirmButton = {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    androidx.compose.material3.FilledTonalButton(onClick = { confirmDeck = false }, modifier = Modifier.weight(1f)) { Text("Cancel") }
+                    Button(onClick = { vm.playDeck(); confirmDeck = false }, enabled = g.deckPlayable, modifier = Modifier.weight(1f)) { Text("Play it") }
+                }
+            },
+        )
+    }
     AnalysisDialog(ui, vm)
     noteFor?.let { order ->
         NotesDialog(g, order, myName, canEditNotes, onSave = { vm.setNote(order, it); noteFor = null }, onDismiss = { noteFor = null })
@@ -517,7 +539,7 @@ private fun CluePanel(
         }
     }
     // A clue is valid if we have a clue token and it touches at least one card.
-    val valid = g.clues > 0 && choice?.let(::touches) == true
+    val valid = g.clues > 0 && choice?.let { g.options.emptyClues || touches(it) } == true
 
     Surface(tonalElevation = 3.dp, shadowElevation = 6.dp) {
         Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -529,7 +551,7 @@ private fun CluePanel(
                             onClick = {
                                 onPartner(p)
                                 // Keep the chosen clue if it is still valid for the new partner.
-                                if (choice != null && !touchesIn(p, choice)) onChoice(null)
+                                if (choice != null && !(g.options.emptyClues || touchesIn(p, choice))) onChoice(null)
                             },
                             label = { Text(g.name(p)) },
                         )
@@ -547,7 +569,7 @@ private fun CluePanel(
                         pip = name,
                         color = suitColor(name),
                         selected = choice == option,
-                        enabled = g.clues > 0 && touches(option),
+                        enabled = g.clues > 0 && (g.options.emptyClues || touches(option)),
                     ) { onChoice(option) }
                 }
             }
@@ -559,7 +581,7 @@ private fun CluePanel(
                         label = "$r",
                         color = Color(0xFF455A64),
                         selected = choice == option,
-                        enabled = g.clues > 0 && touches(option),
+                        enabled = g.clues > 0 && (g.options.emptyClues || touches(option)),
                     ) { onChoice(option) }
                 }
             }
@@ -1145,6 +1167,8 @@ private fun GameHeader(
     showClueButton: Boolean,
     clueOpen: Boolean,
     onToggleClue: () -> Unit,
+    deckPlayable: Boolean,
+    onDeckPlay: () -> Unit,
     onDiscards: () -> Unit,
 ) {
     val g = shown
@@ -1207,7 +1231,9 @@ private fun GameHeader(
                     Modifier.width(22.dp).height(28.dp)
                         .onGloballyPositioned { bounds["deck"] = it.boundsInRoot() }
                         .background(Color(0xFF455A64), RoundedCornerShape(4.dp))
-                        .border(1.5.dp, Color(0xFFB0BEC5), RoundedCornerShape(4.dp)),
+                        // A gold border says the last card can be played blind (tap the deck to do it).
+                        .border(if (deckPlayable) 2.5.dp else 1.5.dp, if (deckPlayable) Color(0xFFFFC107) else Color(0xFFB0BEC5), RoundedCornerShape(4.dp))
+                        .clickable(enabled = deckPlayable, onClick = onDeckPlay),
                     contentAlignment = Alignment.Center,
                 ) { Text("${g.deckSize}", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color.White) }
                 Text("${g.finalScore}/${g.scoreDenominator}", fontSize = 14.sp, fontWeight = FontWeight.Bold)
@@ -1253,4 +1279,37 @@ private fun NavButton(label: String, enabled: Boolean, onClick: () -> Unit, onLo
             ),
         contentAlignment = Alignment.Center,
     ) { Text(label, color = ink) }
+}
+
+
+/** A player's detrimental character (an emoji and name); tap it to read its restriction. */
+@Composable
+private fun CharacterTag(character: live.hanab.client.game.CharacterInfo?) {
+    if (character == null) return
+    var open by remember { mutableStateOf(false) }
+    Text(
+        "${character.emoji} ${character.name}",
+        style = MaterialTheme.typography.labelMedium,
+        color = Color(0xFFFFCA28),
+        modifier = Modifier.clickable { open = true }.padding(horizontal = 8.dp, vertical = 4.dp),
+    )
+    if (open) {
+        AlertDialog(
+            onDismissRequest = { open = false },
+            title = { Text("${character.emoji} ${character.name}") },
+            text = { Text(character.text) },
+            confirmButton = { TextButton(onClick = { open = false }) { Text("Close") } },
+        )
+    }
+}
+
+/** Shows a refusal or warning from the server (e.g. an illegal clue) over the game until dismissed. */
+@Composable
+fun ErrorBanner(text: String, onDismiss: () -> Unit) {
+    Surface(color = MaterialTheme.colorScheme.errorContainer, contentColor = MaterialTheme.colorScheme.onErrorContainer) {
+        Row(Modifier.fillMaxWidth().clickable(onClick = onDismiss).padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(text, modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+            Text("OK", fontWeight = FontWeight.Bold, modifier = Modifier.padding(start = 12.dp))
+        }
+    }
 }

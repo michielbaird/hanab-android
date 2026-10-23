@@ -31,6 +31,9 @@ object AppSettings {
     /** Open the clue panel by itself at the start of your turn. Off by default: the Clue button opens it. */
     var autoClue by mutableStateOf(false); private set
 
+    /** Show tables in variants this app cannot play (dimmed, with no Join / Watch). Hidden by default. */
+    var showUnsupported by mutableStateOf(false); private set
+
     /** The faint fireworks picture behind every screen. */
     var backdrop by mutableStateOf(true); private set
 
@@ -49,6 +52,7 @@ object AppSettings {
         keepAwake = prefs.getBoolean("keepAwake", true)
         backdrop = prefs.getBoolean("backdrop", true)
         autoClue = prefs.getBoolean("autoClue", false)
+        showUnsupported = prefs.getBoolean("showUnsupported", false)
         lastPassword = prefs.getString("lastPassword", "") ?: ""
     }
 
@@ -65,6 +69,7 @@ object AppSettings {
     fun changeSoundMode(v: SoundMode) { soundMode = v; prefs.edit().putString("soundMode", v.name).apply() }
     fun changeVolume(v: Int) { volume = v.coerceIn(0, 100); prefs.edit().putInt("volume", volume).apply() }
     fun changeHaptics(v: Boolean) { haptics = v; prefs.edit().putBoolean("haptics", v).apply() }
+    fun changeShowUnsupported(v: Boolean) { showUnsupported = v; prefs.edit().putBoolean("showUnsupported", v).apply() }
     fun changeAutoClue(v: Boolean) { autoClue = v; prefs.edit().putBoolean("autoClue", v).apply() }
     fun changeBackdrop(v: Boolean) { backdrop = v; prefs.edit().putBoolean("backdrop", v).apply() }
     fun changeKeepAwake(v: Boolean) { keepAwake = v; prefs.edit().putBoolean("keepAwake", v).apply() }
