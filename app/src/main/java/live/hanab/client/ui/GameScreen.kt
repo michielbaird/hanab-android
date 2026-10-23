@@ -263,6 +263,8 @@ private fun GameBoard(live: GameState, vm: LobbyViewModel, ui: LobbyUiState) {
     val tapOpensNotes = g.spectating || g.revealAll
     var showDiscards by remember { mutableStateOf(false) }
     var confirmDeck by remember { mutableStateOf(false) }
+    var showTerminate by remember { mutableStateOf(false) }
+    val canTerminate = !live.spectating && live.phase == Phase.Playing && ui.replay == null && reviewIdx == null
     // A play/discard that needs a second "are you sure": (order, isPlay, explanation).
     var warn by remember { mutableStateOf<Triple<Int, Boolean, String>?>(null) }
     var infoOn by remember { mutableStateOf(setOf<Int>()) }   // players whose hand shows deduced knowledge
@@ -312,7 +314,8 @@ private fun GameBoard(live: GameState, vm: LobbyViewModel, ui: LobbyUiState) {
                             CharacterTag(g.characters.getOrNull(p))
                             InfoToggle("What they know", p in infoOn) { toggleInfo(p) }
                         }
-                        LazyRow(
+                        FitHand(g.hands[p].size, 62.dp, 2.dp) {
+LazyRow(
                             contentPadding = PaddingValues(top = RAISE, bottom = 12.dp),
                             horizontalArrangement = Arrangement.spacedBy(2.dp),
                             userScrollEnabled = false,
@@ -336,6 +339,7 @@ private fun GameBoard(live: GameState, vm: LobbyViewModel, ui: LobbyUiState) {
                                 }
                             }
                         }
+}
                     }
                 }
                 // Our own hand always shows what we know / can deduce (a spectator sees real cards instead).
@@ -358,7 +362,8 @@ private fun GameBoard(live: GameState, vm: LobbyViewModel, ui: LobbyUiState) {
                         if (g.spectating) InfoToggle("What they know", g.ourIndex in infoOn) { toggleInfo(g.ourIndex) }
                         else if (g.revealAll) InfoToggle("What I knew", g.ourIndex in infoOn) { toggleInfo(g.ourIndex) }
                     }
-                    LazyRow(
+                    FitHand(g.hands[g.ourIndex].size, 56.dp, 6.dp) {
+LazyRow(
                         contentPadding = PaddingValues(top = RAISE, bottom = 12.dp),
                         horizontalArrangement = Arrangement.spacedBy(6.dp),
                         userScrollEnabled = false,
@@ -377,6 +382,7 @@ private fun GameBoard(live: GameState, vm: LobbyViewModel, ui: LobbyUiState) {
                             }
                         }
                     }
+}
                 }
                 Column {
                     g.log.takeLast(5).forEach { Text(it.text, style = MaterialTheme.typography.bodySmall) }
@@ -395,6 +401,8 @@ private fun GameBoard(live: GameState, vm: LobbyViewModel, ui: LobbyUiState) {
                     live, reviewIdx, g, replay, amLeader, follow, { follow = it }, setReview, bounds,
                     showClueButton = g.ourTurn, clueOpen = showClue, onToggleClue = { showClue = !showClue },
                     deckPlayable = g.deckPlayable, onDeckPlay = { confirmDeck = true },
+                    // Only players of a game in progress can end it (not spectators, replays or review).
+                    onStrikesLongPress = if (canTerminate) ({ showTerminate = true }) else null,
                 ) { showDiscards = true }
             }
         }
@@ -416,6 +424,15 @@ private fun GameBoard(live: GameState, vm: LobbyViewModel, ui: LobbyUiState) {
     }
 
     if (showDiscards) DiscardDialog(g) { showDiscards = false }
+    if (showTerminate && canTerminate) {
+        TerminateDialog(
+            voted = ui.terminateVote,
+            players = live.numPlayers,
+            onVote = { vm.voteToTerminate() },
+            onTerminate = { vm.terminateNow(); showTerminate = false },
+            onDismiss = { showTerminate = false },
+        )
+    }
     if (confirmDeck) {
         AlertDialog(
             onDismissRequest = { confirmDeck = false },
@@ -1169,6 +1186,7 @@ private fun GameHeader(
     onToggleClue: () -> Unit,
     deckPlayable: Boolean,
     onDeckPlay: () -> Unit,
+    onStrikesLongPress: (() -> Unit)?,
     onDiscards: () -> Unit,
 ) {
     val g = shown
@@ -1216,8 +1234,22 @@ private fun GameHeader(
                     Modifier.size(24.dp).background(if (g.clues == 0) Color(0xFFD32F2F) else Color(0xFF1976D2), androidx.compose.foundation.shape.CircleShape),
                     contentAlignment = Alignment.Center,
                 ) { Text("${g.clues}", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color.White) }
-                // strikes: three boxes, filled when taken
-                Row(horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+                // strikes: three boxes, filled when taken. Long-press opens the terminate / vote form.
+                val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
+                Row(
+                    Modifier
+                        .then(
+                            if (onStrikesLongPress != null) Modifier.combinedClickable(
+                                onClick = {},
+                                onLongClick = {
+                                    haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
+                                    onStrikesLongPress()
+                                },
+                            ) else Modifier,
+                        )
+                        .padding(horizontal = 6.dp, vertical = 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(3.dp),
+                ) {
                     repeat(3) { i ->
                         Box(
                             Modifier.size(14.dp)
@@ -1312,4 +1344,61 @@ fun ErrorBanner(text: String, onDismiss: () -> Unit) {
             Text("OK", fontWeight = FontWeight.Bold, modifier = Modifier.padding(start = 12.dp))
         }
     }
+}
+
+
+/**
+ * Shrinks a row of cards so that it fits the width. Six cards (two or three players with "one extra
+ * card") need more than a narrow phone has; every size inside is scaled down by the same factor, so
+ * the cards, their text and symbols stay in proportion. [perCard] is one card including its margin and
+ * [gap] the space between cards. Nothing changes when the row already fits.
+ */
+@Composable
+private fun FitHand(count: Int, perCard: androidx.compose.ui.unit.Dp, gap: androidx.compose.ui.unit.Dp, content: @Composable () -> Unit) {
+    androidx.compose.foundation.layout.BoxWithConstraints(Modifier.fillMaxWidth()) {
+        val needed = perCard * count + gap * (count - 1).coerceAtLeast(0)
+        val scale = if (needed > 0.dp) (maxWidth / needed).coerceAtMost(1f) else 1f
+        if (scale < 1f) {
+            val d = androidx.compose.ui.platform.LocalDensity.current
+            androidx.compose.runtime.CompositionLocalProvider(
+                androidx.compose.ui.platform.LocalDensity provides androidx.compose.ui.unit.Density(d.density * scale, d.fontScale),
+            ) { content() }
+        } else content()
+    }
+}
+
+
+/**
+ * The form behind a long-press on the strikes: vote to end the game, or end it now. A vote is a toggle
+ * and the game ends once half the players have voted (both of them in a 2-player game). Ending it now
+ * takes two taps, since it can't be undone, and counts as a loss.
+ */
+@Composable
+private fun TerminateDialog(voted: Boolean, players: Int, onVote: () -> Unit, onTerminate: () -> Unit, onDismiss: () -> Unit) {
+    var sure by remember { mutableStateOf(false) }
+    val needed = if (players == 2) "both players" else "at least half of the players"
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("End this game?") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("Vote to terminate: the game ends when $needed have voted. You can take your vote back.", style = MaterialTheme.typography.bodyMedium)
+                Text(if (voted) "You have voted to terminate." else "You have not voted.", style = MaterialTheme.typography.labelLarge)
+                Text("End now: the game ends immediately for everyone and counts as a loss.", style = MaterialTheme.typography.bodyMedium)
+            }
+        },
+        confirmButton = {
+            Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                androidx.compose.material3.FilledTonalButton(onClick = onDismiss, modifier = Modifier.fillMaxWidth()) { Text("Cancel") }
+                OutlinedButton(onClick = onVote, modifier = Modifier.fillMaxWidth()) {
+                    Text(if (voted) "Withdraw my vote" else "Vote to terminate")
+                }
+                Button(
+                    onClick = { if (sure) onTerminate() else sure = true },
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = androidx.compose.material3.ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
+                ) { Text(if (sure) "Tap again to end the game" else "End the game now") }
+            }
+        },
+    )
 }

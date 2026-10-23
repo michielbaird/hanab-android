@@ -53,6 +53,8 @@ data class LobbyUiState(
     val tableChat: List<ChatMessage> = emptyList(),
     /** Live plays/discards waiting to be animated (oldest first). */
     val moves: List<MoveEvent> = emptyList(),
+    /** Whether we have voted to terminate the current game (the server tells us only our own vote). */
+    val terminateVote: Boolean = false,
     /** Latest progress / failure text per bot being invited (key = bot name). */
     val botStatus: Map<String, String> = emptyMap(),
     /** Bot whose "/analyze" reply is on screen, and how many PMs from it existed when we asked. */
@@ -456,6 +458,18 @@ class LobbyViewModel(app: Application) : AndroidViewModel(app) {
         })
     }
 
+    /** Toggle our vote to terminate the game; it ends once half the players (both, with two) have voted. */
+    fun voteToTerminate() {
+        val id = _ui.value.game?.tableID ?: return
+        client.send("tableVoteForTermination", buildJsonObject { put("tableID", id) })
+    }
+
+    /** End the game right now (it counts as a loss). Any player may do this. */
+    fun terminateNow() {
+        val id = _ui.value.game?.tableID ?: return
+        client.send("tableTerminate", buildJsonObject { put("tableID", id) })
+    }
+
     fun play(order: Int) = sendAction(0, order, 0)
 
     /** Bottom-deck blind play: play the last card of the deck without seeing it (its order is the highest). */
@@ -520,7 +534,7 @@ class LobbyViewModel(app: Application) : AndroidViewModel(app) {
             d["databaseID"]?.jsonPrimitive?.intOrNull ?: 0,
             d["sharedReplayLeader"]?.jsonPrimitive?.content.orEmpty(),
         ) else null
-        _ui.update { it.copy(game = stateWithOptions, joinedTableID = tableID, replay = replay, sharedSegment = null) }
+        _ui.update { it.copy(game = stateWithOptions, joinedTableID = tableID, replay = replay, sharedSegment = null, terminateVote = false) }
         client.send("getGameInfo2", buildJsonObject { put("tableID", tableID) })
     }
 
@@ -715,6 +729,9 @@ class LobbyViewModel(app: Application) : AndroidViewModel(app) {
             "noteListPlayer" -> (m.data as? JsonObject)?.get("notes")?.let { n ->
                 val list = (n as? JsonArray)?.map { it.jsonPrimitive.content } ?: emptyList()
                 _ui.update { it.copy(game = it.game?.withNotes(list)) }
+            }
+            "voteChange" -> (m.data as? JsonObject)?.get("vote")?.let { v ->
+                _ui.update { it.copy(terminateVote = (v as? JsonPrimitive)?.content == "true") }
             }
             "boot" -> _ui.update { it.copy(joinedTableID = null, game = null, tableChat = emptyList(), replay = null, sharedSegment = null) }
             "error" -> (m.data as? JsonObject)?.get("error")?.let { e ->
