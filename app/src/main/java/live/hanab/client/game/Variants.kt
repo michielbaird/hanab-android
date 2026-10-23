@@ -49,8 +49,14 @@ object Variants {
 
     fun load(context: Context) {
         if (suitInfos.isNotEmpty()) return
+        fun read(name: String) = context.assets.open(name).bufferedReader().use { it.readText() }
+        parse(read("colors.json"), read("suits.json"), read("variants.json"))
+    }
+
+    /** Builds the suit and variant tables from the JSON texts (apart from [load] so a test can run it). */
+    fun parse(colorsText: String, suitsText: String, variantsText: String) {
+        if (suitInfos.isNotEmpty()) return
         // Plain suits (Red, Blue, ...) carry no fill of their own: it comes from the colour of the same name.
-        val colorsText = context.assets.open("colors.json").bufferedReader().use { it.readText() }
         val colorFills = Json.parseToJsonElement(colorsText).jsonArray.mapNotNull { el ->
             val o = el.jsonObject
             val n = o.str("name") ?: return@mapNotNull null
@@ -63,7 +69,6 @@ object Variants {
             val c = o.str("fillColorblind")?.let(::parseHex) ?: return@mapNotNull null
             n to c
         }.toMap()
-        val suitsText = context.assets.open("suits.json").bufferedReader().use { it.readText() }
         val infos = mutableMapOf<String, SuitInfo>()
         for (el in Json.parseToJsonElement(suitsText).jsonArray) {
             val o = el.jsonObject
@@ -88,7 +93,6 @@ object Variants {
         }
         suitInfos = infos
 
-        val variantsText = context.assets.open("variants.json").bufferedReader().use { it.readText() }
         val byName = mutableMapOf<String, List<String>>()
         val ok = mutableListOf<String>()
         for (el in Json.parseToJsonElement(variantsText).jsonArray) {

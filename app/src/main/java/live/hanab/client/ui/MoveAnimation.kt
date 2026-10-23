@@ -69,7 +69,9 @@ fun FlightCard(g: GameState, flight: Flight, origin: Offset, onDone: () -> Unit)
     val cx = start.x + (end.x - start.x) * slide
     val cy = start.y + (end.y - start.y) * slide - liftPx * lift * (1f - slide)
 
-    val scale = (1f + 0.2f * lift - 0.45f * slide) * (1f - 0.7f * exit)
+    // The card it leaves may have been scaled to fit its hand, so start from that size.
+    val unit = (flight.from.width / with(density) { CARD_W.dp.toPx() }).coerceIn(0.5f, 1.5f)
+    val scale = (1f + 0.2f * lift - 0.45f * slide) * (1f - 0.7f * exit) * unit
     val faceUp = !flight.flip || flipT >= 0.5f
     val squash = if (flight.flip) abs(cos(PI * flipT)).toFloat().coerceAtLeast(0.02f) else 1f
 
@@ -117,7 +119,8 @@ fun DrawFlightCard(from: Rect, to: Rect, origin: Offset, onDone: () -> Unit) {
     val h = with(density) { CARD_H.dp.toPx() }
     val cx = from.center.x + (to.center.x - from.center.x) * t
     val cy = from.center.y + (to.center.y - from.center.y) * t
-    val scale = 0.55f + 0.45f * t
+    val unit = (to.width / w).coerceIn(0.5f, 1.5f)
+    val scale = (0.55f + 0.45f * t) * unit
     Box(
         Modifier
             .offset { IntOffset((cx - origin.x - w / 2).roundToInt(), (cy - origin.y - h / 2).roundToInt()) }

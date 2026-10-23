@@ -53,6 +53,8 @@ data class LobbyUiState(
     val tableChat: List<ChatMessage> = emptyList(),
     /** Live plays/discards waiting to be animated (oldest first). */
     val moves: List<MoveEvent> = emptyList(),
+    /** Whether we have voted to terminate the current game (the server tells us only our own vote). */
+    val terminateVote: Boolean = false,
     /** Latest progress / failure text per bot being invited (key = bot name). */
     val botStatus: Map<String, String> = emptyMap(),
     /** Bot whose "/analyze" reply is on screen, and how many PMs from it existed when we asked. */
@@ -89,6 +91,7 @@ class LobbyViewModel(app: Application) : AndroidViewModel(app) {
         PipStore.init(app)
         AppSettings.load(app)
         BotStore.load(app)
+        live.hanab.client.game.Characters.load(app)
         GameSounds.init(app)
         creds.password()?.let { pw -> if (creds.username.isNotBlank()) login(creds.username, pw) }
         viewModelScope.launch { client.messages.collect(::handle) }
@@ -370,14 +373,25 @@ class LobbyViewModel(app: Application) : AndroidViewModel(app) {
         })
     }
 
-    fun createTable(name: String, variant: String, maxPlayers: Int, password: String = "") {
+    /** Change the options of the table we are at (the server only accepts this from the table owner). */
+    fun updateTable(name: String, opts: live.hanab.client.net.TableOpts, maxPlayers: Int) {
+        val table = _ui.value.joinedTableID?.let { _ui.value.tables[it] } ?: return
+        client.send("tableUpdate", buildJsonObject {
+            put("tableID", table.id)
+            put("name", name.ifBlank { table.name })
+            put("maxPlayers", maxPlayers)
+            put("options", opts.toJson())
+        })
+    }
+
+    fun createTable(name: String, opts: live.hanab.client.net.TableOpts, maxPlayers: Int, password: String = "") {
         client.send("tableCreate", buildJsonObject {
             put("name", name.ifBlank { _ui.value.me?.randomTableName ?: "Table" })
             put("maxPlayers", maxPlayers)
             if (password.isNotEmpty()) put("password", password)
             tablePassword = password
             AppSettings.rememberPassword(password)
-            put("options", buildJsonObject { put("variantName", variant) })
+            put("options", opts.toJson())
         })
     }
 
@@ -444,7 +458,25 @@ class LobbyViewModel(app: Application) : AndroidViewModel(app) {
         })
     }
 
+    /** Toggle our vote to terminate the game; it ends once half the players (both, with two) have voted. */
+    fun voteToTerminate() {
+        val id = _ui.value.game?.tableID ?: return
+        client.send("tableVoteForTermination", buildJsonObject { put("tableID", id) })
+    }
+
+    /** End the game right now (it counts as a loss). Any player may do this. */
+    fun terminateNow() {
+        val id = _ui.value.game?.tableID ?: return
+        client.send("tableTerminate", buildJsonObject { put("tableID", id) })
+    }
+
     fun play(order: Int) = sendAction(0, order, 0)
+
+    /** Bottom-deck blind play: play the last card of the deck without seeing it (its order is the highest). */
+    fun playDeck() {
+        val g = _ui.value.game ?: return
+        if (g.deckPlayable) sendAction(0, g.totalCards - 1, 0)
+    }
     fun discard(order: Int) = sendAction(1, order, 0)
     fun colorClue(player: Int, color: Int) = sendAction(2, player, color)
     fun rankClue(player: Int, rank: Int) = sendAction(3, player, rank)
@@ -479,12 +511,30 @@ class LobbyViewModel(app: Application) : AndroidViewModel(app) {
             suits = suits,
             suitInfos = suits.map(Variants::info),
         )
+        // The special options of this game, and each player's detrimental character if there are any.
+        val opts = d["options"] as? JsonObject
+        fun flag(k: String) = (opts?.get(k) as? JsonPrimitive)?.content == "true"
+        val gameOptions = live.hanab.client.game.GameOptions(
+            emptyClues = flag("emptyClues"), cardCycle = flag("cardCycle"), deckPlays = flag("deckPlays"),
+            allOrNothing = flag("allOrNothing"), detrimentalCharacters = flag("detrimentalCharacters"),
+            speedrun = flag("speedrun"),
+        )
+        val assignments = d["characterAssignments"] as? JsonArray
+        val metadata = d["characterMetadata"] as? JsonArray
+        val characters = if (gameOptions.detrimentalCharacters && assignments != null) {
+            assignments.mapIndexed { i, e ->
+                val id = (e as? JsonPrimitive)?.intOrNull ?: -1
+                val meta = (metadata?.getOrNull(i) as? JsonPrimitive)?.intOrNull ?: -1
+                live.hanab.client.game.Characters.describe(id, meta, state.clueColors, suits)
+            }
+        } else emptyList()
+        val stateWithOptions = state.copy(options = gameOptions, characters = characters)
         val shared = (d["sharedReplay"] as? JsonPrimitive)?.content == "true"
         val replay = if (shared) ReplayInfo(
             d["databaseID"]?.jsonPrimitive?.intOrNull ?: 0,
             d["sharedReplayLeader"]?.jsonPrimitive?.content.orEmpty(),
         ) else null
-        _ui.update { it.copy(game = state, joinedTableID = tableID, replay = replay, sharedSegment = null) }
+        _ui.update { it.copy(game = stateWithOptions, joinedTableID = tableID, replay = replay, sharedSegment = null, terminateVote = false) }
         client.send("getGameInfo2", buildJsonObject { put("tableID", tableID) })
     }
 
@@ -679,6 +729,9 @@ class LobbyViewModel(app: Application) : AndroidViewModel(app) {
             "noteListPlayer" -> (m.data as? JsonObject)?.get("notes")?.let { n ->
                 val list = (n as? JsonArray)?.map { it.jsonPrimitive.content } ?: emptyList()
                 _ui.update { it.copy(game = it.game?.withNotes(list)) }
+            }
+            "voteChange" -> (m.data as? JsonObject)?.get("vote")?.let { v ->
+                _ui.update { it.copy(terminateVote = (v as? JsonPrimitive)?.content == "true") }
             }
             "boot" -> _ui.update { it.copy(joinedTableID = null, game = null, tableChat = emptyList(), replay = null, sharedSegment = null) }
             "error" -> (m.data as? JsonObject)?.get("error")?.let { e ->

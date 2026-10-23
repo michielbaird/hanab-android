@@ -233,4 +233,42 @@ class GameStateTest {
         assertEquals(null, start.lastClue)                       // and no clue bubble
         assertEquals(4, start.hands[1].size)                     // everybody still holds their dealt cards
         assertEquals(1, g.replayTo(g.turnStops[1]).turn)         // after the first move
+    }
+    @Test fun cardCyclingMovesTheGiversChopToTheFront() {
+        var g = GameState(
+            tableID = 1, playerNames = listOf("me", "bob"), ourIndex = 0, spectating = false,
+            variantName = "No Variant", suits = listOf("Red", "Yellow", "Green", "Blue", "Purple"),
+            options = live.hanab.client.game.GameOptions(cardCycle = true),
+        )
+        // bob holds orders 4..7, newest first: [7, 6, 5, 4]; his oldest (the chop) is 4.
+        for (o in 0..3) g = g.apply(j("""{"type":"draw","playerIndex":0,"order":$o,"suitIndex":-1,"rank":-1}"""))
+        for (o in 4..7) g = g.apply(j("""{"type":"draw","playerIndex":1,"order":$o,"suitIndex":0,"rank":1}"""))
+        assertEquals(listOf(7, 6, 5, 4), g.hands[1])
+        // bob clues me: his chop (4) goes to the newest slot.
+        g = g.apply(j("""{"type":"clue","clue":{"type":1,"value":1},"giver":1,"list":[0],"target":0,"ignoreNegative":false}"""))
+        assertEquals(listOf(4, 7, 6, 5), g.hands[1])
+        assertEquals(listOf(3, 2, 1, 0), g.hands[0])             // the receiver's hand is untouched
+        // I clue bob's oldest card (5 is now the oldest): it counts as clued, so the chop is 6.
+        g = g.apply(j("""{"type":"clue","clue":{"type":1,"value":1},"giver":0,"list":[5],"target":1,"ignoreNegative":false}"""))
+        // my own chop is 1 (the card 0 was clued): it moves to the front of MY hand
+        assertEquals(listOf(1, 3, 2, 0), g.hands[0])
+    }
+
+    @Test fun characterTextGetsItsRandomValue() {
+        val colors = listOf("Red", "Yellow", "Green")
+        val suits = listOf("Red", "Yellow", "Green", "Blue")
+        assertEquals("Can only clue numbers and green", live.hanab.client.game.fillCharacterText("Can only clue numbers and [random color]", 2, colors, suits))
+        assertEquals("Cannot clue 4s", live.hanab.client.game.fillCharacterText("Cannot clue [random number]s", 4, colors, suits).replace("Cannot clue 4s", "Cannot clue 4s"))
+        assertEquals("Only Blue", live.hanab.client.game.fillCharacterText("Only [random suit]", 3, colors, suits))
+        assertEquals("No placeholder", live.hanab.client.game.fillCharacterText("No placeholder", 1, colors, suits))
+    }
+
+    @Test fun tableOptionsSerialiseTheServersNames() {
+        val json = live.hanab.client.net.TableOpts(variantName = "Rainbow (5 Suits)", cardCycle = true, emptyClues = true).toJson()
+        assertEquals("\"Rainbow (5 Suits)\"", json["variantName"].toString())
+        assertEquals("true", json["cardCycle"].toString())
+        assertEquals("true", json["emptyClues"].toString())
+        assertEquals("false", json["speedrun"].toString())
+        assertEquals("false", json["timed"].toString())
+        assertEquals(listOf("Card cycling", "Empty clues"), live.hanab.client.net.TableOpts(cardCycle = true, emptyClues = true).activeLabels)
     }}

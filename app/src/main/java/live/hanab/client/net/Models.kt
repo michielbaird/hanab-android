@@ -1,6 +1,7 @@
 package live.hanab.client.net
 
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.put
 
 @Serializable
 data class Welcome(
@@ -38,7 +39,49 @@ data class Table(
     val sharedReplay: Boolean = false,
     val variant: String = "",
     val timed: Boolean = false,
+    val options: TableOpts = TableOpts(),
 )
+
+/** The special options of a table, as the server names them (see "Options" in the server). */
+@Serializable
+data class TableOpts(
+    val variantName: String = "No Variant",
+    val speedrun: Boolean = false,
+    val cardCycle: Boolean = false,
+    val deckPlays: Boolean = false,
+    val emptyClues: Boolean = false,
+    val oneExtraCard: Boolean = false,
+    val oneLessCard: Boolean = false,
+    val allOrNothing: Boolean = false,
+    val detrimentalCharacters: Boolean = false,
+) {
+    /** Names of the switched-on special options, for a one-line summary. */
+    val activeLabels: List<String>
+        get() = buildList {
+            if (speedrun) add("Speedrun")
+            if (cardCycle) add("Card cycling")
+            if (deckPlays) add("Bottom-deck blind play")
+            if (emptyClues) add("Empty clues")
+            if (oneExtraCard) add("One extra card")
+            if (oneLessCard) add("One less card")
+            if (allOrNothing) add("All or nothing")
+            if (detrimentalCharacters) add("Detrimental characters")
+        }
+
+    /** The "options" object of tableCreate / tableUpdate. (Timed games are not offered here.) */
+    fun toJson(): kotlinx.serialization.json.JsonObject = kotlinx.serialization.json.buildJsonObject {
+        put("variantName", variantName)
+        put("timed", false)
+        put("speedrun", speedrun)
+        put("cardCycle", cardCycle)
+        put("deckPlays", deckPlays)
+        put("emptyClues", emptyClues)
+        put("oneExtraCard", oneExtraCard)
+        put("oneLessCard", oneLessCard)
+        put("allOrNothing", allOrNothing)
+        put("detrimentalCharacters", detrimentalCharacters)
+    }
+}
 
 @Serializable
 data class ChatMessage(

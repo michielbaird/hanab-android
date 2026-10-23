@@ -25,6 +25,16 @@ data class Card(
 
 data class LogLine(val text: String)
 
+/** The special options of this game that change how it is played. */
+data class GameOptions(
+    val emptyClues: Boolean = false,
+    val cardCycle: Boolean = false,
+    val deckPlays: Boolean = false,
+    val allOrNothing: Boolean = false,
+    val detrimentalCharacters: Boolean = false,
+    val speedrun: Boolean = false,
+)
+
 /** One person's note on a card. Notes are per person: players and spectators each keep their own. */
 data class NoteEntry(val name: String, val text: String, val isSpectator: Boolean)
 
@@ -103,6 +113,9 @@ data class GameState(
     val actions: List<JsonObject> = emptyList(),
     /** True for a rebuilt past position: no moves may be made from it. */
     val readOnly: Boolean = false,
+    val options: GameOptions = GameOptions(),
+    /** Each player's detrimental character (null = none), by player index. */
+    val characters: List<CharacterInfo?> = emptyList(),
     val lastClue: ClueMark? = null,
     /** Everyone's notes by card order, as the server sends them to spectators and in replays. */
     val allNotes: Map<Int, List<NoteEntry>> = emptyMap(),
@@ -117,6 +130,12 @@ data class GameState(
 
     /** The other players in the order they will act after us; the last one acts just before us. */
     val othersInTurnOrder: List<Int> get() = (1 until numPlayers).map { (ourIndex + it) % numPlayers }
+
+    /** Number of cards in the whole deck (the last one, by order, is what a bottom-deck blind play plays). */
+    val totalCards: Int get() = suitInfos.map { if (it.oneOfEach) 5 else 10 }.sum()
+
+    /** With the "bottom-deck blind play" option, the last card may be played blind on your turn. */
+    val deckPlayable: Boolean get() = options.deckPlays && deckSize == 1 && ourTurn
 
     /** The best score the variant allows: 5 per suit. (The server's `maxScore` shrinks as critical cards are lost.) */
     val perfectScore: Int get() = suits.size * 5
@@ -136,6 +155,10 @@ data class GameState(
         2 -> "Three strikes"
         3 -> "Time ran out"
         4 -> "Terminated by a player"
+        5 -> "Speedrun failed"
+        7 -> "Character softlock"
+        8 -> "All or nothing failed"
+        9 -> "All or nothing softlock"
         6 -> "Idle timeout"
         10 -> "Terminated by vote"
         null -> "Game over"
@@ -173,6 +196,14 @@ data class GameState(
         if (next === this) this else next.copy(actions = actions + a)
     }
 
+    /** The hand after card cycling: its oldest unclued card (the chop) moves to the newest slot (the front). */
+    private fun cycleChop(hand: List<Int>, cards: Map<Int, Card>): List<Int> {
+        val chop = hand.indexOfLast { cards[it]?.clued != true }
+        // -1: every card is clued; 0: the chop already is the newest card. Either way nothing moves.
+        if (chop <= 0) return hand
+        return listOf(hand[chop]) + hand.filterIndexed { i, _ -> i != chop }
+    }
+
     /**
      * Positions worth stopping at when stepping back, as a number of actions to replay.
      *  - the starting position: the initial deal, before any clue, play or discard. The server sends no
@@ -191,7 +222,10 @@ data class GameState(
 
     /** The game as it was after the first [k] actions (read-only). */
     fun replayTo(k: Int): GameState {
-        val blank = GameState(tableID, playerNames, ourIndex, spectating, variantName, suits)
+        val blank = GameState(
+            tableID, playerNames, ourIndex, spectating, variantName, suits,
+            suitInfos = suitInfos, options = options, characters = characters,
+        )
         val past = blank.applyAll(actions.take(k)).copy(actions = actions, notes = notes, allNotes = allNotes, readOnly = true)
         return if (revealAll) past.withIdentities(identities) else past
     }
@@ -267,6 +301,8 @@ data class GameState(
                 val what = if (isColor) clueColors.getOrElse(value) { "?" } else "$value"
                 copy(
                     cards = newCards,
+                    // Card cycling: the giver's oldest unclued card moves to their newest slot.
+                    hands = if (options.cardCycle) hands.mapIndexed { i, h -> if (i == giver) cycleChop(h, newCards) else h } else hands,
                     lastClue = ClueMark(
                         orders = touched,
                         color = if (isColor) clueColors.getOrNull(value) else null,
