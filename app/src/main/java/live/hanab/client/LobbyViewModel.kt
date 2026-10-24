@@ -93,13 +93,17 @@ class LobbyViewModel(app: Application) : AndroidViewModel(app) {
         BotStore.load(app)
         live.hanab.client.game.Characters.load(app)
         GameSounds.init(app)
+        KeepAliveService.onExpired = ::onBackgroundTimeout
         creds.password()?.let { pw -> if (creds.username.isNotBlank()) login(creds.username, pw) }
         viewModelScope.launch { client.messages.collect(::handle) }
         viewModelScope.launch { client.errors.collect { e -> _ui.update { it.copy(error = e) } } }
         viewModelScope.launch {
             client.state.collect { s ->
                 val dropped = s == ConnState.Disconnected && _ui.value.loggedIn
-                if (dropped && creds.password() != null) {
+                if (dropped && suspended) {
+                    // We closed the socket ourselves after the app sat in the background too long.
+                    _ui.update { it.copy(connection = s) }
+                } else if (dropped && creds.password() != null) {
                     // Keep the current screen (even a game in progress) and sign back in behind it.
                     _ui.update { it.copy(connection = s, reconnecting = true) }
                     startReconnect()
@@ -114,6 +118,18 @@ class LobbyViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private var reconnectJob: Job? = null
+
+    /** True once the connection was closed on purpose because the app stayed out of sight; cleared on return. */
+    private var suspended = false
+
+    /** The app has been in the background for the whole keep-alive period: close the connection quietly. */
+    fun onBackgroundTimeout() {
+        if (!_ui.value.loggedIn) return
+        suspended = true
+        reconnectJob?.cancel()
+        _ui.update { it.copy(reconnecting = false) }
+        client.disconnect()
+    }
 
     /** Retries sign-in with growing pauses until the server answers with "welcome". */
     private fun startReconnect() {
@@ -143,6 +159,7 @@ class LobbyViewModel(app: Application) : AndroidViewModel(app) {
 
     /** Called when the app returns to the foreground; the phone may have dropped the socket meanwhile. */
     fun onForeground() {
+        suspended = false
         val s = _ui.value
         if (s.loggedIn && client.state.value == ConnState.Disconnected && !s.reconnecting && creds.password() != null) {
             _ui.update { it.copy(reconnecting = true) }
