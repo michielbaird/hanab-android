@@ -42,6 +42,8 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.material3.FilterChip
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.drawBehind
@@ -188,6 +190,16 @@ private fun GameBoard(live: GameState, vm: LobbyViewModel, ui: LobbyUiState) {
     val moves = ui.moves
     // Review mode: index into live.turnStops, or null for the live game. Everything below draws `g`.
     var reviewIdx by remember { mutableStateOf<Int?>(null) }
+    // Moves to animate because the user stepped one turn forward in a replay / review (ids are negative,
+    // to tell them from live moves, which the view model numbers upwards).
+    var reviewMoves by remember { mutableStateOf<List<live.hanab.client.game.MoveEvent>>(emptyList()) }
+    val localIds = remember { longArrayOf(0L) }
+    fun goTo(i: Int?) {
+        val last = live.turnStops.size - 1
+        val stepped = if (last >= 1) live.movesBetweenStops(reviewIdx ?: last, i ?: last) else emptyList()
+        reviewMoves = stepped.map { it.copy(id = --localIds[0]) }
+        reviewIdx = i
+    }
     val g = remember(live, reviewIdx) { reviewIdx?.let { i -> live.turnStops.getOrNull(i)?.let(live::replayTo) } ?: live }
 
     // Shared replay: the leader's segment drives everyone who is following; the leader's own steps are broadcast.
@@ -197,11 +209,11 @@ private fun GameBoard(live: GameState, vm: LobbyViewModel, ui: LobbyUiState) {
     LaunchedEffect(ui.sharedSegment, follow, live.turnStops.size) {
         val seg = ui.sharedSegment
         if (replay != null && !amLeader && follow && seg != null) {
-            reviewIdx = if (seg >= live.turnStops.size - 1) null else seg
+            goTo(if (seg >= live.turnStops.size - 1) null else seg)
         }
     }
     val setReview: (Int?) -> Unit = { i ->
-        reviewIdx = i
+        goTo(i)
         if (replay != null) {
             if (amLeader) vm.sendReplaySegment(i ?: (live.turnStops.size - 1).coerceAtLeast(0)) else follow = false
         }
@@ -219,8 +231,10 @@ private fun GameBoard(live: GameState, vm: LobbyViewModel, ui: LobbyUiState) {
     // A played card changes its stack only once the flying card has landed: until then the stack keeps
     // showing the old number (held while the flight runs, and for plays not yet picked up below).
     val holdBack = remember { mutableStateMapOf<Int, Int>() }
-    val pendingHold = if (reviewIdx == null) moves.filter { it.play }.associate { it.suit to it.rank - 1 } else emptyMap()
-    val shownStacks = g.stacks.mapIndexed { i, v -> if (reviewIdx != null) v else holdBack[i] ?: pendingHold[i] ?: v }
+    // Live moves that arrive while looking at an earlier turn are not animated (the screen shows the past).
+    val allMoves = moves.filter { reviewIdx == null } + reviewMoves
+    val pendingHold = allMoves.filter { it.play }.associate { it.suit to it.rank - 1 }
+    val shownStacks = g.stacks.mapIndexed { i, v -> holdBack[i] ?: pendingHold[i] ?: v }
     LaunchedEffect(ui.draws) {
         if (ui.draws.isEmpty()) return@LaunchedEffect
         val batch = ui.draws
@@ -241,17 +255,19 @@ private fun GameBoard(live: GameState, vm: LobbyViewModel, ui: LobbyUiState) {
             }
         }
     }
-    LaunchedEffect(moves) {
-        if (moves.isEmpty()) return@LaunchedEffect
-        moves.forEach { m ->
+    LaunchedEffect(moves, reviewMoves) {
+        // Live moves and replay steps both fly the card from where it was to the stack or the discards.
+        allMoves.forEach { m ->
             val from = bounds["card:${m.order}"]
             val to = if (m.play) bounds["stack:${m.suit}"] else bounds["discards"]
-            if (AppSettings.animSpeed != AnimSpeed.Off && reviewIdx == null && from != null && to != null) {
-                flights += Flight(m, from, to, flip = m.player == g.ourIndex && !g.spectating)
+            if (AppSettings.animSpeed != AnimSpeed.Off && from != null && to != null) {
+                // In a finished game every card is public, so there is nothing to turn over.
+                flights += Flight(m, from, to, flip = m.player == g.ourIndex && !g.spectating && !g.revealAll)
                 if (m.play) holdBack[m.suit] = m.rank - 1
             }
         }
-        vm.consumeMoves(moves.last().id)
+        if (moves.isNotEmpty()) vm.consumeMoves(moves.last().id)
+        if (reviewMoves.isNotEmpty()) reviewMoves = emptyList()
     }
     var selected by remember { mutableStateOf<Int?>(null) }   // own card order awaiting play/discard
     var noteFor by remember { mutableStateOf<Int?>(null) }    // card order whose notes screen is open
@@ -290,17 +306,44 @@ private fun GameBoard(live: GameState, vm: LobbyViewModel, ui: LobbyUiState) {
 
     Box(Modifier.fillMaxSize().onGloballyPositioned { origin = it.positionInRoot() }) {
     Surface(Modifier.fillMaxSize(), color = Color.Transparent, contentColor = MaterialTheme.colorScheme.onBackground) {
+        androidx.compose.runtime.CompositionLocalProvider(
+            androidx.compose.material3.LocalMinimumInteractiveComponentSize provides androidx.compose.ui.unit.Dp.Unspecified,
+        ) {
         Column(Modifier) {
             // Pinned at the top: the stacks, where played cards land, stay on screen while the hands scroll.
             Column(
-                Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, top = 12.dp),
+                Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, top = 4.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 Stacks(g, shownStacks, bounds, pulseSuit)
             }
+            androidx.compose.foundation.layout.BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
+            val outer = androidx.compose.ui.platform.LocalDensity.current
+            val availPx = with(outer) { maxHeight.toPx() }
+            // Width: the widest hand (one card is 62dp with its margin, 2dp between cards) must fit.
+            val widthScale = (g.othersInTurnOrder.map { g.hands[it].size } + g.hands[g.ourIndex].size)
+                .maxOrNull()?.let { n -> if (n > 0) (maxWidth - 12.dp) / (60.dp * n + 2.dp * (n - 1)) else 1f } ?: 1f
+            // Height: measured. naturalPx is the hands' height at scale 1, learnt from the last layout.
+            var naturalPx by remember { mutableFloatStateOf(0f) }
+            // The end-of-game panel sits above the hands, so do not squeeze them then.
+            val fitHeight = g.phase != Phase.Over || reviewIdx != null
+            val heightScale = if (fitHeight && naturalPx > 0f) (availPx / naturalPx) else 1f
+            // The scale snaps down to steps of 4%. Every size is rounded to whole pixels, so the measured height
+            // wobbles a little from one scale to the next; without steps, that wobble would nudge the scale,
+            // which re-measures, which wobbles again: the board shook continuously with six players.
+            val scale = snapHandScale(minOf(widthScale, heightScale))
+            Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
+            androidx.compose.runtime.CompositionLocalProvider(
+                androidx.compose.ui.platform.LocalDensity provides androidx.compose.ui.unit.Density(outer.density * scale, outer.fontScale),
+            ) {
             Column(
-                Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(12.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
+                Modifier.fillMaxWidth().padding(horizontal = 6.dp)
+                    .onSizeChanged { size ->
+                        val natural = size.height / scale
+                        // Only a real change (another hand, a taller header) counts, not rounding noise.
+                        if (naturalPx == 0f || kotlin.math.abs(natural - naturalPx) > naturalPx * 0.03f) naturalPx = natural
+                    },
+                verticalArrangement = Arrangement.spacedBy(1.dp),
             ) {
                 g.othersInTurnOrder.forEach { p ->
                     val kn = if (p in infoOn) g.knowledgeOf(p) else null
@@ -314,9 +357,8 @@ private fun GameBoard(live: GameState, vm: LobbyViewModel, ui: LobbyUiState) {
                             CharacterTag(g.characters.getOrNull(p))
                             InfoToggle("What they know", p in infoOn) { toggleInfo(p) }
                         }
-                        FitHand(g.hands[p].size, 62.dp, 2.dp) {
-LazyRow(
-                            contentPadding = PaddingValues(top = RAISE, bottom = 12.dp),
+                        LazyRow(
+                            contentPadding = PaddingValues(top = RAISE, bottom = 4.dp),
                             horizontalArrangement = Arrangement.spacedBy(2.dp),
                             userScrollEnabled = false,
                         ) {
@@ -329,7 +371,7 @@ LazyRow(
                                             .alpha(if (o in arriving || o in pendingDraws) 0f else 1f)
                                             .raiseIfClued(c.clued)
                                             .background(if (hl) Color(0xFFFFEB3B) else Color.Transparent, RoundedCornerShape(11.dp))
-                                            .padding(3.dp)
+                                            .padding(2.dp)
                                             .onGloballyPositioned { bounds["card:$o"] = it.boundsInRoot() }
                                             .combinedClickable(onClick = { if (tapOpensNotes) noteFor = o }, onLongClick = { noteFor = o }),
                                     ) {
@@ -339,7 +381,6 @@ LazyRow(
                                 }
                             }
                         }
-}
                     }
                 }
                 // Our own hand always shows what we know / can deduce (a spectator sees real cards instead).
@@ -362,9 +403,8 @@ LazyRow(
                         if (g.spectating) InfoToggle("What they know", g.ourIndex in infoOn) { toggleInfo(g.ourIndex) }
                         else if (g.revealAll) InfoToggle("What I knew", g.ourIndex in infoOn) { toggleInfo(g.ourIndex) }
                     }
-                    FitHand(g.hands[g.ourIndex].size, 56.dp, 6.dp) {
-LazyRow(
-                        contentPadding = PaddingValues(top = RAISE, bottom = 12.dp),
+                    LazyRow(
+                        contentPadding = PaddingValues(top = RAISE, bottom = 4.dp),
                         horizontalArrangement = Arrangement.spacedBy(6.dp),
                         userScrollEnabled = false,
                     ) {
@@ -382,21 +422,26 @@ LazyRow(
                             }
                         }
                     }
-}
+                }
+            }   // hands column
+            }   // density scale
+            // Below the hands, reached by scrolling: the result panel, the log, and leaving.
+            Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                if (g.phase == Phase.Over && !g.readOnly) {
+                    EndPanel(g, ui, onWatch = { reviewIdx = 0 }, vm = vm)
                 }
                 Column {
                     g.log.takeLast(5).forEach { Text(it.text, style = MaterialTheme.typography.bodySmall) }
-                }
-                if (g.phase == Phase.Over && !g.readOnly) {
-                    EndPanel(g, ui, onWatch = { reviewIdx = 0 }, vm = vm)
                 }
                 OutlinedButton(onClick = vm::leaveTable, modifier = Modifier.fillMaxWidth()) {
                     Text(if (g.phase == Phase.Over) "Back to lobby" else "Leave game")
                 }
             }
+            }   // scroll column
+            }   // BoxWithConstraints
             if (g.ourTurn && showClue) CluePanel(g, vm, partners, cluePartner, { cluePartner = it }, clueChoice, { clueChoice = it })
             // Pinned at the bottom, where the thumb is: game info on the left, playback buttons on the right.
-            Surface(Modifier.padding(horizontal = 12.dp, vertical = 8.dp), tonalElevation = 2.dp, shape = RoundedCornerShape(10.dp)) {
+            Surface(Modifier.padding(horizontal = 12.dp, vertical = 4.dp), tonalElevation = 2.dp, shape = RoundedCornerShape(10.dp)) {
                 GameHeader(
                     live, reviewIdx, g, replay, amLeader, follow, { follow = it }, setReview, bounds,
                     showClueButton = g.ourTurn, clueOpen = showClue, onToggleClue = { showClue = !showClue },
@@ -405,6 +450,7 @@ LazyRow(
                     onStrikesLongPress = if (canTerminate) ({ showTerminate = true }) else null,
                 ) { showDiscards = true }
             }
+        }
         }
     }
     flights.toList().forEach { f ->
@@ -559,7 +605,7 @@ private fun CluePanel(
     val valid = g.clues > 0 && choice?.let { g.options.emptyClues || touches(it) } == true
 
     Surface(tonalElevation = 3.dp, shadowElevation = 6.dp) {
-        Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             if (partners.size > 1) {
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     partners.forEach { p ->
@@ -650,7 +696,7 @@ private fun ClueToggle(
     val shape = RoundedCornerShape(8.dp)
     Box(
         modifier
-            .height(44.dp)
+            .height(38.dp)
             .alpha(if (enabled) 1f else 0.25f)
             .background(color, shape)
             .border(if (selected) BorderStroke(3.dp, Color.White) else BorderStroke(1.dp, Color(0x55FFFFFF)), shape)
@@ -668,7 +714,7 @@ private fun Stacks(g: GameState, shown: List<Int>, bounds: MutableMap<String, Re
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
         g.suits.forEachIndexed { i, s ->
             Box(
-                Modifier.weight(1f).height(44.dp).onGloballyPositioned { bounds["stack:$i"] = it.boundsInRoot() }
+                Modifier.weight(1f).height(36.dp).onGloballyPositioned { bounds["stack:$i"] = it.boundsInRoot() }
                     .graphicsLayer {
                         val s = if (pulse == i) 1.18f else 1f
                         scaleX = s; scaleY = s
@@ -884,8 +930,8 @@ private fun InfoToggle(label: String, on: Boolean, onClick: () -> Unit) {
     FilterChip(
         selected = on,
         onClick = onClick,
-        label = { Text(label, fontSize = 12.sp) },
-        modifier = Modifier.height(30.dp),
+        label = { Text(label, fontSize = 10.sp) },
+        modifier = Modifier.height(22.dp),
     )
 }
 
@@ -1007,7 +1053,7 @@ private fun CardBadges(critical: Boolean, discardable: Boolean, modifier: Modifi
         }
     }
 }
-private val RAISE = 10.dp
+private val RAISE = 6.dp
 
 /** Clued cards sit slightly higher than the rest of the hand, which makes the chop easy to spot. */
 @Composable
@@ -1054,8 +1100,8 @@ private fun androidx.compose.foundation.layout.BoxScope.ClueBubbleFor(g: GameSta
     Box(
         Modifier
             .align(Alignment.BottomCenter)
-            .offset(y = 11.dp)
-            .size(24.dp)
+            .offset(y = 4.dp)
+            .size(20.dp)
             .graphicsLayer { scaleX = grow.value; scaleY = grow.value }
             .drawBehind {
                 // An expanding, fading ring around the bubble.
@@ -1078,7 +1124,7 @@ private fun androidx.compose.foundation.layout.BoxScope.ClueBubbleFor(g: GameSta
         if (mark.rank != null) {
             Text("${mark.rank}", fontSize = 14.sp, fontWeight = FontWeight.ExtraBold, color = Color.White)
         }
-        if (mark.color != null) Pip(mark.color, 16.dp)
+        if (mark.color != null) Pip(mark.color, 14.dp)
     }
 }/** A small black waste bin, drawn directly so its colour is not decided by the emoji font. */
 @Composable
@@ -1158,7 +1204,7 @@ private fun Modifier.turnGlow(active: Boolean): Modifier {
     val line by androidx.compose.animation.animateColorAsState(if (active) amber else Color.Transparent, label = "turnLine")
     val wash by androidx.compose.animation.animateColorAsState(if (active) amber.copy(alpha = 0.14f) else Color.Transparent, label = "turnWash")
     val shape = RoundedCornerShape(12.dp)
-    return this.background(wash, shape).border(2.dp, line, shape).padding(6.dp)
+    return this.background(wash, shape).border(1.5.dp, line, shape).padding(horizontal = 5.dp, vertical = 1.dp)
 }
 
 /**
@@ -1192,7 +1238,7 @@ private fun GameHeader(
     val g = shown
     val n = live.turnStops.size
     val amber = Color(0xFFFFB300)
-    Column(Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 6.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+    Column(Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 4.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
         // ---- turn info
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             val text = when {
@@ -1213,7 +1259,7 @@ private fun GameHeader(
                 // Opens / closes the clue panel above (it can open by itself: see Settings).
                 androidx.compose.material3.FilledTonalButton(
                     onClick = onToggleClue,
-                    modifier = Modifier.height(30.dp),
+                    modifier = Modifier.height(28.dp),
                     contentPadding = PaddingValues(horizontal = 14.dp),
                 ) { Text(if (clueOpen) "Clue \u25BC" else "Clue \u25B2", fontSize = 13.sp) }
             }
@@ -1272,7 +1318,7 @@ private fun GameHeader(
                 // discard pile: a bin with the count
                 OutlinedButton(
                     onClick = onDiscards,
-                    modifier = Modifier.height(32.dp).onGloballyPositioned { bounds["discards"] = it.boundsInRoot() },
+                    modifier = Modifier.height(30.dp).onGloballyPositioned { bounds["discards"] = it.boundsInRoot() },
                     contentPadding = PaddingValues(horizontal = 8.dp),
                 ) {
                     BinIcon(Modifier.size(13.dp), MaterialTheme.colorScheme.onSurface)
@@ -1299,7 +1345,7 @@ private fun NavButton(label: String, enabled: Boolean, onClick: () -> Unit, onLo
     val alpha = if (enabled) 1f else 0.35f
     val ink = MaterialTheme.colorScheme.onSurface.copy(alpha = alpha)
     Box(
-        Modifier.height(40.dp).width(48.dp)
+        Modifier.height(34.dp).width(48.dp)
             .border(1.dp, ink.copy(alpha = alpha * 0.6f), shape)
             .combinedClickable(
                 enabled = enabled,
@@ -1347,25 +1393,6 @@ fun ErrorBanner(text: String, onDismiss: () -> Unit) {
 }
 
 
-/**
- * Shrinks a row of cards so that it fits the width. Six cards (two or three players with "one extra
- * card") need more than a narrow phone has; every size inside is scaled down by the same factor, so
- * the cards, their text and symbols stay in proportion. [perCard] is one card including its margin and
- * [gap] the space between cards. Nothing changes when the row already fits.
- */
-@Composable
-private fun FitHand(count: Int, perCard: androidx.compose.ui.unit.Dp, gap: androidx.compose.ui.unit.Dp, content: @Composable () -> Unit) {
-    androidx.compose.foundation.layout.BoxWithConstraints(Modifier.fillMaxWidth()) {
-        val needed = perCard * count + gap * (count - 1).coerceAtLeast(0)
-        val scale = if (needed > 0.dp) (maxWidth / needed).coerceAtMost(1f) else 1f
-        if (scale < 1f) {
-            val d = androidx.compose.ui.platform.LocalDensity.current
-            androidx.compose.runtime.CompositionLocalProvider(
-                androidx.compose.ui.platform.LocalDensity provides androidx.compose.ui.unit.Density(d.density * scale, d.fontScale),
-            ) { content() }
-        } else content()
-    }
-}
 
 
 /**
@@ -1402,3 +1429,4 @@ private fun TerminateDialog(voted: Boolean, players: Int, onVote: () -> Unit, on
         },
     )
 }
+
