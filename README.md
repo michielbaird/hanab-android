@@ -45,28 +45,28 @@ them, and ask a bot to analyze a finished game.
 
 ## Building
 
-Requirements: Android Studio (or the Android SDK), **JDK 17**, and the Android SDK platform 35. Point `JAVA_HOME` at the JDK 17 first.
+Requirements: Android Studio (or the Android SDK), **JDK 21** (17 also works), and the Android SDK platform 35. Point `JAVA_HOME` at it first (on Windows the scripts default to a JDK 21 in `~\.jdks`, such as the one Android Studio downloads).
 
 Debug build (installable straight away, signed with the debug key):
 
 ```powershell
 # Windows
-$env:JAVA_HOME = "C:\path	o\jdk-17"
+$env:JAVA_HOME = "C:\path\to\jdk-21"
 .uild.ps1                      # appuild\outputspk\debugpp-debug.apk
 .uild.ps1 testDebugUnitTest    # runs the unit tests
 ```
 
 ```bash
 # macOS / Linux
-export JAVA_HOME=/path/to/jdk-17
+export JAVA_HOME=/path/to/jdk-21
 ./gradlew assembleDebug           # app/build/outputs/apk/debug/app-debug.apk
 ./gradlew testDebugUnitTest
 ```
 
-Or open the folder in Android Studio, set Settings > Build Tools > Gradle > Gradle JDK to 17, and press Run.
+Or open the folder in Android Studio, set Settings > Build Tools > Gradle > Gradle JDK to 21, and press Run.
 
 Notes:
-- Newer JDKs (21 and 25) made Gradle 8.9 fail on one Windows machine with "Unable to establish loopback connection".
+- JDK 25 (Android Studio's newest bundled JBR) makes Gradle 8.9 fail with "Unable to establish loopback connection"; use 21 or 17.
 - `build.ps1` / `release.ps1` point `TEMP` at `C:\gtmp`, because the same error appears when the temp path is long.
 - `local.properties` (the SDK path) is machine-specific and not committed.
 
@@ -81,8 +81,10 @@ keytool -genkeypair -v -keystore hanab-release.jks -alias hanab -keyalg RSA -key
 Then copy `keystore.properties.example` to `keystore.properties` and fill in the path and passwords (both files are gitignored). Build:
 
 ```powershell
-.elease.ps1            # Windows  -> dist\hanab-<version>.apk (+ .sha256)
-.elease.ps1 -Bundle    # Windows  -> dist\hanab-<version>.aab
+.
+elease.ps1            # Windows  -> dist\hanab-<version>.apk (+ .sha256)
+.
+elease.ps1 -Bundle    # Windows  -> dist\hanab-<version>.aab
 ```
 
 ```bash

@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # Builds a release APK (or an AAB for the Play Store with --bundle) into dist/.
-# Needs JAVA_HOME (JDK 17) and, for an installable APK, a keystore.properties (see README).
+# Needs JAVA_HOME (JDK 21; 17 also works) and, for an installable APK, a keystore.properties (see README).
 set -euo pipefail
 cd "$(dirname "$0")"
 
-if [ -z "${JAVA_HOME:-}" ]; then echo "Set JAVA_HOME to a JDK 17" >&2; exit 1; fi
+if [ -z "${JAVA_HOME:-}" ]; then echo "Set JAVA_HOME to a JDK 21 (17 also works)" >&2; exit 1; fi
 if [ -z "${ANDROID_HOME:-}" ]; then
   case "$(uname -s)" in
     Darwin) export ANDROID_HOME="$HOME/Library/Android/sdk" ;;
