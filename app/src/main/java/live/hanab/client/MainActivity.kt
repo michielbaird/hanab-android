@@ -29,8 +29,26 @@ class MainActivity : ComponentActivity() {
         vm.onForeground()
     }
 
+    // onPause rather than onStop: a foreground service may only be started while the app is still in front.
+    override fun onPause() {
+        super.onPause()
+        if (vm.ui.value.loggedIn) KeepAliveService.start(this)
+    }
+
+    override fun onResume() {
+        super.onResume()
+        KeepAliveService.stop(this)
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        if (android.os.Build.VERSION.SDK_INT >= 33 &&
+            checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED
+        ) {
+            // Lets the "staying connected" notification show; the app works the same if it is declined.
+            registerForActivityResult(androidx.activity.result.contract.ActivityResultContracts.RequestPermission()) {}
+                .launch(android.Manifest.permission.POST_NOTIFICATIONS)
+        }
         setContent {
             MaterialTheme(colorScheme = darkColorScheme()) {
                 val ui by vm.ui.collectAsStateWithLifecycle()
