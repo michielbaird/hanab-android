@@ -52,8 +52,8 @@ Debug build (installable straight away, signed with the debug key):
 ```powershell
 # Windows
 $env:JAVA_HOME = "C:\path\to\jdk-21"
-.uild.ps1                      # appuild\outputspk\debugpp-debug.apk
-.uild.ps1 testDebugUnitTest    # runs the unit tests
+.\build.ps1                      # app\build\outputs\apk\debug\app-debug.apk
+.\build.ps1 testDebugUnitTest    # runs the unit tests
 ```
 
 ```bash
@@ -81,10 +81,8 @@ keytool -genkeypair -v -keystore hanab-release.jks -alias hanab -keyalg RSA -key
 Then copy `keystore.properties.example` to `keystore.properties` and fill in the path and passwords (both files are gitignored). Build:
 
 ```powershell
-.
-elease.ps1            # Windows  -> dist\hanab-<version>.apk (+ .sha256)
-.
-elease.ps1 -Bundle    # Windows  -> dist\hanab-<version>.aab
+.\release.ps1            # Windows  -> dist\hanab-<version>.apk (+ .sha256)
+.\release.ps1 -Bundle    # Windows  -> dist\hanab-<version>.aab
 ```
 
 ```bash
