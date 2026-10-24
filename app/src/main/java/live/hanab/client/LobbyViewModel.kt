@@ -651,9 +651,12 @@ class LobbyViewModel(app: Application) : AndroidViewModel(app) {
             }
             "left" -> _ui.update { it.copy(joinedTableID = null, game = null, tableChat = emptyList(), replay = null, sharedSegment = null) }
             "tableStart" -> (m.data as? JsonObject)?.let { d ->
-                if ((d["replay"] as? JsonPrimitive)?.content != "true") {
-                    d["tableID"]?.jsonPrimitive?.intOrNull?.let(::beginGame)
-                }
+                // When our own finished game turns into a shared replay the server repeats "tableStart" with
+                // replay=true; we already show that game, so only load a replay we are not looking at yet
+                // (one we just chose to watch from the lobby).
+                val id = d["tableID"]?.jsonPrimitive?.intOrNull
+                val isReplay = (d["replay"] as? JsonPrimitive)?.content == "true"
+                if (id != null && (!isReplay || _ui.value.game?.tableID != id)) beginGame(id)
             }
             "init" -> (m.data as? JsonObject)?.let(::onInit)
             "gameActionList" -> (m.data as? JsonObject)?.get("list")?.let { list ->
