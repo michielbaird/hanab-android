@@ -102,7 +102,7 @@ private fun TablesTab(ui: LobbyUiState, vm: LobbyViewModel) {
         Button(onClick = { creating = true }, modifier = Modifier.fillMaxWidth().padding(12.dp)) { Text("New table") }
         if (tables.isEmpty() && unsupported.isEmpty()) Text("No tables right now.", Modifier.padding(16.dp))
         LazyColumn(Modifier.weight(1f)) {
-            items(tables, key = { it.id }) { t -> TableRow(t, vm, supported = Variants.isSupported(t.variant) || t.joined) }
+            items(tables, key = { it.id }) { t -> TableRow(t, vm, supported = Variants.isSupported(t.variant) || t.joined, current = ui.joinedTableID) }
             if (unsupported.isNotEmpty()) {
                 item {
                     Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -144,7 +144,7 @@ private fun CreateTableDialog(ui: LobbyUiState, vm: LobbyViewModel, onDismiss: (
     )
 }
 @Composable
-private fun TableRow(t: Table, vm: LobbyViewModel, supported: Boolean = true) {
+private fun TableRow(t: Table, vm: LobbyViewModel, supported: Boolean = true, current: Int? = null) {
     var askPassword by remember { mutableStateOf(false) }
     var password by remember { mutableStateOf(live.hanab.client.AppSettings.lastPassword) }
     Column(Modifier.fillMaxWidth().alpha(if (supported) 1f else 0.55f).padding(horizontal = 16.dp, vertical = 10.dp)) {
@@ -153,7 +153,7 @@ private fun TableRow(t: Table, vm: LobbyViewModel, supported: Boolean = true) {
                 Text(t.name, style = MaterialTheme.typography.titleSmall)
                 Text(
                     "${t.variant} - ${t.numPlayers}/${t.maxPlayers} players" +
-                        (if (t.running) " - in progress" else "") +
+                        (if (t.running) (if (t.sharedReplay) " - replay" else " - in progress") else "") +
                         (if (t.passwordProtected) " - locked" else ""),
                     style = MaterialTheme.typography.bodySmall,
                 )
@@ -167,8 +167,17 @@ private fun TableRow(t: Table, vm: LobbyViewModel, supported: Boolean = true) {
                 }
             }
             // No Join / Watch for a variant the app cannot play: its clue and card logic would be wrong.
-            if (supported && t.running && !t.joined) {
-                OutlinedButton(onClick = { vm.spectateTable(t.id) }) { Text(if (t.sharedReplay) "Replay" else "Watch") }
+            // The server keeps a finished game's seats listed as a shared replay, so "joined" stays true after
+            // we leave it; it cannot be re-attended or left from here, only watched again (which can then be left).
+            if (supported && t.running && t.sharedReplay) {
+                OutlinedButton(onClick = { vm.spectateTable(t.id) }) { Text("Replay") }
+            } else if (supported && t.running && t.joined && t.id != current) {
+                OutlinedButton(onClick = { vm.reopenTable(t.id) }) { Text("Open") } // a game we are still seated in
+            } else if (supported && t.running && !t.joined) {
+                OutlinedButton(onClick = { vm.spectateTable(t.id) }) { Text("Watch") }
+            }
+            if (!t.running && t.joined && t.id != current) {
+                TextButton(onClick = { vm.leaveTableById(t.id) }) { Text("Leave") }
             }
             if (supported && !t.running && !t.joined) {
                 Button(onClick = { if (t.passwordProtected) askPassword = !askPassword else vm.joinTable(t.id) }) {
