@@ -271,4 +271,24 @@ class GameStateTest {
         assertEquals("false", json["speedrun"].toString())
         assertEquals("false", json["timed"].toString())
         assertEquals(listOf("Card cycling", "Empty clues"), live.hanab.client.net.TableOpts(cardCycle = true, emptyClues = true).activeLabels)
+    }
+    /** Stepping one turn forward in a replay finds the play / discard to animate. */
+    @Test fun movesBetweenStopsFindsThePlayOrDiscard() {
+        var g = start()
+        g = g.apply(j("""{"type":"status","clues":8,"score":0,"maxScore":10}"""))
+        g = g.apply(j("""{"type":"clue","clue":{"type":1,"value":1},"giver":0,"list":[4],"target":1,"ignoreNegative":false}"""))
+        g = g.apply(j("""{"type":"turn","num":1,"currentPlayerIndex":1}"""))
+        g = g.apply(j("""{"type":"play","playerIndex":1,"order":4,"suitIndex":0,"rank":1}"""))
+        g = g.apply(j("""{"type":"draw","playerIndex":1,"order":8,"suitIndex":0,"rank":2}"""))
+        g = g.apply(j("""{"type":"turn","num":2,"currentPlayerIndex":0}"""))
+        g = g.apply(j("""{"type":"discard","playerIndex":0,"order":0,"suitIndex":1,"rank":3,"failed":true}"""))
+        g = g.apply(j("""{"type":"turn","num":3,"currentPlayerIndex":1}"""))
+        assertEquals(4, g.turnStops.size)                                   // the start, then after each of 3 moves
+        assertEquals(emptyList<Any>(), g.movesBetweenStops(0, 1))           // a clue: nothing flies
+        val play = g.movesBetweenStops(1, 2).single()
+        assertEquals(true, play.play); assertEquals(4, play.order); assertEquals(0, play.suit); assertEquals(1, play.rank)
+        val miss = g.movesBetweenStops(2, 3).single()
+        assertEquals(false, miss.play); assertEquals(true, miss.failed); assertEquals(0, miss.order)
+        assertEquals(emptyList<Any>(), g.movesBetweenStops(0, 2))           // a jump
+        assertEquals(emptyList<Any>(), g.movesBetweenStops(2, 1))           // going back
     }}

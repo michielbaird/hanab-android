@@ -220,6 +220,25 @@ data class GameState(
         ((if (firstMove >= 0) listOf(firstMove) else emptyList()) + afterTurns).distinct()
     }
 
+    /**
+     * The plays and discards between stop [from] and the next stop [to] (numbers as in [turnStops]), as
+     * animation events (id 0; the caller numbers them). Only a single step forward has a move to show:
+     * anything else (a jump, or going back) returns nothing, so those positions just appear.
+     */
+    fun movesBetweenStops(from: Int, to: Int): List<MoveEvent> {
+        val stops = turnStops
+        if (from !in stops.indices || to != from + 1 || to !in stops.indices) return emptyList()
+        return actions.subList(stops[from], stops[to]).mapNotNull { a ->
+            val type = a["type"]?.jsonPrimitive?.content
+            if (type != "play" && type != "discard") return@mapNotNull null
+            fun n(key: String) = a[key]?.jsonPrimitive?.intOrNull ?: -1
+            MoveEvent(
+                id = 0, play = type == "play", player = n("playerIndex"), order = n("order"),
+                suit = n("suitIndex"), rank = n("rank"), failed = a["failed"]?.jsonPrimitive?.booleanOrNull == true,
+            )
+        }
+    }
+
     /** The game as it was after the first [k] actions (read-only). */
     fun replayTo(k: Int): GameState {
         val blank = GameState(

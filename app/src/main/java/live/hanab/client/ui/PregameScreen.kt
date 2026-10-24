@@ -3,6 +3,8 @@ package live.hanab.client.ui
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -45,11 +47,15 @@ fun PregameScreen(ui: LobbyUiState, vm: LobbyViewModel) {
         .filter { u -> BotStore.isBot(u.name) && players.none { it.equals(u.name, true) } }
         .sortedBy { it.name.lowercase() }
 
+    androidx.compose.runtime.CompositionLocalProvider(
+        androidx.compose.material3.LocalMinimumInteractiveComponentSize provides androidx.compose.ui.unit.Dp.Unspecified,
+    ) {
     Surface(Modifier.fillMaxSize(), color = Color.Transparent, contentColor = MaterialTheme.colorScheme.onBackground) {
-        Column(Modifier.safeDrawingPadding().padding(24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Column(Modifier.safeDrawingPadding().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            // The part that can grow (up to six players, bots, option summaries) scrolls on its own...
             Column(
                 Modifier.weight(1f).verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 Text(table?.name ?: "Table", style = MaterialTheme.typography.headlineSmall)
                 Text("${table?.variant ?: ""} - ${table?.numPlayers ?: 0}/${table?.maxPlayers ?: 0} players")
@@ -59,13 +65,13 @@ fun PregameScreen(ui: LobbyUiState, vm: LobbyViewModel) {
                 // Only the table owner can change the game; the server refuses anyone else.
                 if (isOwner) OutlinedButton(onClick = { showEdit = true }, modifier = Modifier.fillMaxWidth()) { Text("Edit game") }
                 players.forEach { p ->
-                    Row(verticalAlignment = Alignment.CenterVertically) {
+                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.heightIn(min = 30.dp)) {
                         Text(
                             p + if (BotStore.isBot(p)) "  (bot)" else "",
-                            style = MaterialTheme.typography.titleMedium,
+                            style = MaterialTheme.typography.titleSmall,
                             modifier = Modifier.weight(1f),
                         )
-                        if (BotStore.isBot(p)) TextButton(onClick = { vm.kickBot(p) }) { Text("Kick") }
+                        if (BotStore.isBot(p)) TextButton(onClick = { vm.kickBot(p) }, contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp)) { Text("Kick") }
                     }
                 }
                 if (botsAtTable.isNotEmpty()) {
@@ -74,8 +80,6 @@ fun PregameScreen(ui: LobbyUiState, vm: LobbyViewModel) {
                         OutlinedButton(onClick = vm::leaveAllBots) { Text("Kick all bots") }
                     }
                 }
-                ui.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-
                 if (BotStore.bots.isNotEmpty()) {
                     OutlinedButton(onClick = { showInvite = true }, modifier = Modifier.fillMaxWidth()) { Text("Invite bots") }
                     // Progress / errors of invites in flight, e.g. "Joining..." or the bot's own refusal.
@@ -86,22 +90,26 @@ fun PregameScreen(ui: LobbyUiState, vm: LobbyViewModel) {
                         }
                     }
                 }
+            }
+            // ...while the message, the buttons and the chat stay put, so they are never pushed off screen.
+            ui.error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                 if (isOwner) {
                     Button(
                         onClick = vm::startTable,
                         enabled = (table?.numPlayers ?: 0) >= 2,
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier.weight(1f),
                     ) { Text("Start game") }
                 } else {
-                    Text("Waiting for the host to start...")
+                    Text("Waiting for the host...", modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
                 }
-                OutlinedButton(onClick = vm::leaveTable, modifier = Modifier.fillMaxWidth()) { Text("Leave table") }
-                Text("Table chat", style = MaterialTheme.typography.titleSmall)
+                OutlinedButton(onClick = vm::leaveTable, modifier = if (isOwner) Modifier.weight(1f) else Modifier) { Text("Leave table") }
             }
-            ChatPanel(ui.tableChat, vm::sendTableChat, Modifier.height(190.dp))
+            Text("Table chat", style = MaterialTheme.typography.titleSmall)
+            ChatPanel(ui.tableChat, vm::sendTableChat, Modifier.height(170.dp))
         }
     }
-
+    }
     if (showInvite) {
         InviteBotsDialog(
             choices = inviteable.map { u ->
