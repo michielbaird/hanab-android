@@ -1,4 +1,4 @@
-# Builds a release APK (or an AAB for the Play Store with -Bundle) into dist\.
+# Builds a release APK (or an AAB with -Bundle) into dist\.
 # Uses JAVA_HOME, defaulting to a JDK 21 in ~\.jdks (JDK 17 also works) and, for an installable APK, a keystore.properties (see README).
 param([switch]$Bundle)
 if (-not $env:JAVA_HOME) {

@@ -82,21 +82,15 @@ Then copy `keystore.properties.example` to `keystore.properties` and fill in the
 
 ```powershell
 .\release.ps1            # Windows  -> dist\hanab-<version>.apk (+ .sha256)
-.\release.ps1 -Bundle    # Windows  -> dist\hanab-<version>.aab
 ```
 
 ```bash
 ./release.sh             # macOS / Linux -> dist/hanab-<version>.apk (+ .sha256)
-./release.sh --bundle    # macOS / Linux -> dist/hanab-<version>.aab
 ```
 
 Without `keystore.properties` the scripts warn and produce `hanab-<version>-unsigned.apk`, which cannot be installed.
 
 To publish on GitHub: bump `versionCode` (must increase every release) and `versionName` in `app/build.gradle.kts`, build, then attach `dist/hanab-<version>.apk` to a new GitHub release.
-
-### Play Store
-
-Play wants the `.aab` bundle, not an APK, and uses Play App Signing: the key above becomes your *upload key* and Google holds the actual signing key. If you want people to be able to update between a GitHub APK and a Play install, sideload builds must be signed with the same key as Play's app signing key, so decide that before you publish. `applicationId` (`live.hanab.client`) is permanent once published.
 
 ## How it works
 

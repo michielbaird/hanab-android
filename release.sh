@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Builds a release APK (or an AAB for the Play Store with --bundle) into dist/.
+# Builds a release APK (or an AAB with --bundle) into dist/.
 # Needs JAVA_HOME (JDK 21; 17 also works) and, for an installable APK, a keystore.properties (see README).
 set -euo pipefail
 cd "$(dirname "$0")"
