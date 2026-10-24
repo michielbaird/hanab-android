@@ -417,6 +417,16 @@ class LobbyViewModel(app: Application) : AndroidViewModel(app) {
             )
         }
     }
+    /** Go back into a game we are still seated in. (A finished game cannot be re-attended; see spectateTable.) */
+    fun reopenTable(id: Int) {
+        client.send("tableReattend", buildJsonObject { put("tableID", id) })
+    }
+
+    /** Leave a table that has not started, from the lobby list, without having it open. */
+    fun leaveTableById(id: Int) {
+        client.send("tableLeave", buildJsonObject { put("tableID", id) })
+    }
+
     /**
      * Start another game with the same players. The server only allows this while every original
      * player is still in the shared replay; otherwise it answers with a warning, shown in the end panel.
