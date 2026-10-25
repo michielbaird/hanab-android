@@ -106,7 +106,7 @@ fun PregameScreen(ui: LobbyUiState, vm: LobbyViewModel) {
                 OutlinedButton(onClick = vm::leaveTable, modifier = if (isOwner) Modifier.weight(1f) else Modifier) { Text("Leave table") }
             }
             Text("Table chat", style = MaterialTheme.typography.titleSmall)
-            ChatPanel(ui.tableChat, vm::sendTableChat, Modifier.height(170.dp))
+            ChatPanel(ui.tableChat, vm::sendTableChat, Modifier.height(170.dp), me = ui.me?.username)
         }
     }
     }
