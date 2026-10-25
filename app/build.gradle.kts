@@ -1,4 +1,4 @@
-﻿import java.util.Properties
+import java.util.Properties
 
 plugins {
     alias(libs.plugins.android.application)
@@ -15,8 +15,8 @@ android {
         applicationId = "live.hanab.client"
         minSdk = 26
         targetSdk = 35
-        versionCode = 2
-        versionName = "0.2"
+        versionCode = 3
+        versionName = "0.3"
     }
     // Release signing comes from keystore.properties (gitignored; see keystore.properties.example).
     // Without it the release build is unsigned and cannot be installed.
