@@ -179,7 +179,7 @@ fun GameScreen(ui: LobbyUiState, g: GameState, vm: LobbyViewModel) {
                                 Text("Table chat", style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f).padding(12.dp))
                                 WatchersButton(watchers)
                             }
-                            ChatPanel(ui.tableChat, vm::sendTableChat)
+                            ChatPanel(ui.tableChat, vm::sendTableChat, me = ui.me?.username)
                         }
                     }
                 } else {
@@ -194,7 +194,7 @@ fun GameScreen(ui: LobbyUiState, g: GameState, vm: LobbyViewModel) {
                         }
                         WatchersButton(watchers)
                     }
-                    if (tab == 0) GameBoard(g, vm, ui) else ChatPanel(ui.tableChat, vm::sendTableChat)
+                    if (tab == 0) GameBoard(g, vm, ui) else ChatPanel(ui.tableChat, vm::sendTableChat, me = ui.me?.username)
                 }
             }
         }

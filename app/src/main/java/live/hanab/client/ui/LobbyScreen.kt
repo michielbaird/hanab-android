@@ -210,14 +210,7 @@ private fun ChatTab(ui: LobbyUiState, vm: LobbyViewModel) {
     }
     Column(Modifier.fillMaxSize()) {
         LazyColumn(Modifier.weight(1f).padding(horizontal = 16.dp), state = listState) {
-            items(ui.chat) { c ->
-                val who = c.who ?: "server"
-                Text(
-                    "$who: ${LobbyViewModel.plain(c.msg)}",
-                    style = MaterialTheme.typography.bodyMedium,
-                    modifier = Modifier.padding(vertical = 2.dp),
-                )
-            }
+            items(ui.chat) { c -> ChatLine(c, ui.me?.username) }
         }
         Row(Modifier.fillMaxWidth().padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
             OutlinedTextField(
@@ -300,7 +293,7 @@ private fun PmTab(ui: LobbyUiState, vm: LobbyViewModel) {
                 TextButton(onClick = { vm.openPm(null) }) { Text("Back") }
                 Text(open, style = MaterialTheme.typography.titleMedium)
             }
-            ChatPanel(ui.pms[open].orEmpty(), { vm.sendPm(open, it) })
+            ChatPanel(ui.pms[open].orEmpty(), { vm.sendPm(open, it) }, me = ui.me?.username)
         }
     }
 }
