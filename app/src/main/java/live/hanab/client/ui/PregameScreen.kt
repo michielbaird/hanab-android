@@ -113,7 +113,7 @@ fun PregameScreen(ui: LobbyUiState, vm: LobbyViewModel) {
     if (showInvite) {
         InviteBotsDialog(
             choices = inviteable.map { u ->
-                InviteChoice(u.name, ui.botStatus[u.name] ?: if (u.tableID != null) "At a table" else "Free")
+                InviteChoice(u.name, ui.botStatus[u.name] ?: botWhere(u))
             },
             needsPassword = table?.passwordProtected == true,
             knownPassword = vm.tablePassword,
@@ -147,4 +147,13 @@ fun PregameScreen(ui: LobbyUiState, vm: LobbyViewModel) {
             dismissButton = { TextButton(onClick = { showEdit = false }) { Text("Cancel") } },
         )
     }
+}
+/**
+ * Where a bot is, for the invite list. The server sends a status number (0 lobby, 1 pregame, 2 playing,
+ * 3 spectating, 4 replay, 5 shared replay) and tableID 0, not null, for someone in the lobby.
+ */
+private fun botWhere(u: live.hanab.client.net.User) = when (u.status.trim().toIntOrNull()) {
+    null, 0 -> "Free"
+    4, 5 -> "In a replay"
+    else -> "At a table"
 }
