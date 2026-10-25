@@ -25,7 +25,11 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.safeDrawingPadding
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.exclude
+import androidx.compose.foundation.layout.ime
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
@@ -92,7 +96,7 @@ fun OutlinedText(
     text: String,
     fontSize: androidx.compose.ui.unit.TextUnit,
     modifier: Modifier = Modifier,
-    fill: Color = Color.White,
+    fill: Color =    Color.White,
     fontWeight: FontWeight = FontWeight.Bold,
 ) {
     if (text.isEmpty()) return
@@ -139,6 +143,9 @@ fun GameScreen(ui: LobbyUiState, g: GameState, vm: LobbyViewModel) {
         view.keepScreenOn = AppSettings.keepAwake
         onDispose { view.keepScreenOn = false }
     }
+    // Everyone else watching this table; the eye shows only when there is someone.
+    val watchers = ui.tables[g.tableID]?.spectators.orEmpty().map { it.name }
+        .filter { !it.equals(ui.me?.username, ignoreCase = true) }
     var tab by remember { mutableIntStateOf(0) }
     var seen by remember { mutableIntStateOf(0) }
     val total = ui.tableChat.size
@@ -151,7 +158,9 @@ fun GameScreen(ui: LobbyUiState, g: GameState, vm: LobbyViewModel) {
         // On a tall tablet there is room to make the whole board bigger.
         val scale = if (wide && maxHeight >= 600.dp) 1.25f else 1f
         Surface(Modifier.fillMaxSize(), color = Color.Transparent, contentColor = MaterialTheme.colorScheme.onBackground) {
-            Column(Modifier.safeDrawingPadding()) {
+            // Safe-drawing insets without the keyboard: the board must not resize when it opens (for a note).
+            // The chat panel makes room for the keyboard itself.
+            Column(Modifier.windowInsetsPadding(WindowInsets.safeDrawing.exclude(WindowInsets.ime))) {
                 ui.error?.let { err ->
                     // Gone after a few seconds, or when tapped.
                     LaunchedEffect(err) { kotlinx.coroutines.delay(6_000); vm.clearError() }
@@ -166,18 +175,24 @@ fun GameScreen(ui: LobbyUiState, g: GameState, vm: LobbyViewModel) {
                             ) { GameBoard(g, vm, ui) }
                         }
                         Column(Modifier.weight(1f).padding(start = 8.dp)) {
-                            Text("Table chat", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(12.dp))
+                            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                                Text("Table chat", style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f).padding(12.dp))
+                                WatchersButton(watchers)
+                            }
                             ChatPanel(ui.tableChat, vm::sendTableChat)
                         }
                     }
                 } else {
-                    androidx.compose.material3.TabRow(selectedTabIndex = tab) {
-                        androidx.compose.material3.Tab(selected = tab == 0, onClick = { tab = 0 }, text = { Text("Game") })
-                        androidx.compose.material3.Tab(
-                            selected = tab == 1,
-                            onClick = { tab = 1 },
-                            text = { Text(if (unread > 0) "Chat ($unread)" else "Chat") },
-                        )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        androidx.compose.material3.TabRow(selectedTabIndex = tab, modifier = Modifier.weight(1f)) {
+                            androidx.compose.material3.Tab(selected = tab == 0, onClick = { tab = 0 }, text = { Text("Game") })
+                            androidx.compose.material3.Tab(
+                                selected = tab == 1,
+                                onClick = { tab = 1 },
+                                text = { Text(if (unread > 0) "Chat ($unread)" else "Chat") },
+                            )
+                        }
+                        WatchersButton(watchers)
                     }
                     if (tab == 0) GameBoard(g, vm, ui) else ChatPanel(ui.tableChat, vm::sendTableChat)
                 }
@@ -185,6 +200,34 @@ fun GameScreen(ui: LobbyUiState, g: GameState, vm: LobbyViewModel) {
         }
     }
 }
+/** An eye with the number of people watching; tap to see who. Nothing is drawn when nobody is. */
+@Composable
+private fun WatchersButton(names: List<String>) {
+    if (names.isEmpty()) return
+    var open by remember { mutableStateOf(false) }
+    val tint = MaterialTheme.colorScheme.onBackground
+    Row(
+        Modifier.clickable { open = true }.padding(horizontal = 12.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        androidx.compose.foundation.Canvas(Modifier.size(width = 22.dp, height = 14.dp)) {
+            val stroke = androidx.compose.ui.graphics.drawscope.Stroke(width = 1.6.dp.toPx())
+            drawOval(tint, style = stroke)
+            drawCircle(tint, radius = size.height * 0.22f)
+        }
+        Text("${names.size}", style = MaterialTheme.typography.labelLarge)
+    }
+    if (open) {
+        AlertDialog(
+            onDismissRequest = { open = false },
+            title = { Text("Watching (${names.size})") },
+            text = { Column { names.forEach { Text(it) } } },
+            confirmButton = { TextButton(onClick = { open = false }) { Text("Close") } },
+        )
+    }
+}
+
 @Composable
 private fun GameBoard(live: GameState, vm: LobbyViewModel, ui: LobbyUiState) {
     val moves = ui.moves
@@ -430,6 +473,15 @@ private fun GameBoard(live: GameState, vm: LobbyViewModel, ui: LobbyUiState) {
             }   // density scale
             // Below the hands, reached by scrolling: the result panel, the log, and leaving.
             Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                ui.tables[live.tableID]?.name?.takeIf { it.isNotBlank() }?.let { name ->
+                    Text(
+                        name,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.6f),
+                        maxLines = 1,
+                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                    )
+                }
                 if (g.phase == Phase.Over && !g.readOnly) {
                     EndPanel(g, ui, onWatch = { reviewIdx = 0 }, vm = vm)
                 }
