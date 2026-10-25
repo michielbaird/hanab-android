@@ -289,6 +289,9 @@ private fun GameBoard(live: GameState, vm: LobbyViewModel, ui: LobbyUiState) {
     var clueChoice by remember(g.turn) { mutableStateOf<ClueChoice?>(null) }
     // Whether the clue panel is open this turn: by itself if the setting is on, otherwise via the Clue button.
     var showClue by remember(g.turn) { mutableStateOf(AppSettings.autoClue) }
+    // Height of the clue panel, kept between turns. The hands are sized as if the panel were not there, so
+    // opening it never rescales them; the hands area just becomes scrollable.
+    var cluePanelPx by remember { mutableFloatStateOf(0f) }
     // Cards the clue being composed would touch (only while composing on our turn).
     val highlighted: Set<Int> = if (!g.ourTurn) emptySet() else clueChoice?.let { c ->
         g.hands[cluePartner].filter { o ->
@@ -319,7 +322,7 @@ private fun GameBoard(live: GameState, vm: LobbyViewModel, ui: LobbyUiState) {
             }
             androidx.compose.foundation.layout.BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
             val outer = androidx.compose.ui.platform.LocalDensity.current
-            val availPx = with(outer) { maxHeight.toPx() }
+            val availPx = with(outer) { maxHeight.toPx() } + if (g.ourTurn && showClue) cluePanelPx else 0f
             // Width: the widest hand (one card is 62dp with its margin, 2dp between cards) must fit.
             val widthScale = (g.othersInTurnOrder.map { g.hands[it].size } + g.hands[g.ourIndex].size)
                 .maxOrNull()?.let { n -> if (n > 0) (maxWidth - 12.dp) / (60.dp * n + 2.dp * (n - 1)) else 1f } ?: 1f
@@ -439,7 +442,11 @@ private fun GameBoard(live: GameState, vm: LobbyViewModel, ui: LobbyUiState) {
             }
             }   // scroll column
             }   // BoxWithConstraints
-            if (g.ourTurn && showClue) CluePanel(g, vm, partners, cluePartner, { cluePartner = it }, clueChoice, { clueChoice = it })
+            if (g.ourTurn && showClue) {
+                Box(Modifier.onSizeChanged { cluePanelPx = it.height.toFloat() }) {
+                    CluePanel(g, vm, partners, cluePartner, { cluePartner = it }, clueChoice, { clueChoice = it })
+                }
+            }
             // Pinned at the bottom, where the thumb is: game info on the left, playback buttons on the right.
             Surface(Modifier.padding(horizontal = 12.dp, vertical = 4.dp), tonalElevation = 2.dp, shape = RoundedCornerShape(10.dp)) {
                 GameHeader(
@@ -607,17 +614,34 @@ private fun CluePanel(
     Surface(tonalElevation = 3.dp, shadowElevation = 6.dp) {
         Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             if (partners.size > 1) {
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    partners.forEach { p ->
-                        FilterChip(
-                            selected = partner == p,
-                            onClick = {
-                                onPartner(p)
-                                // Keep the chosen clue if it is still valid for the new partner.
-                                if (choice != null && !(g.options.emptyClues || touchesIn(p, choice))) onChoice(null)
-                            },
-                            label = { Text(g.name(p)) },
-                        )
+                // Equal-width compact chips (names capped at 16 characters). One row is best, so the text shrinks
+                // (13sp down to 11sp) to keep it; only if the longest name still does not fit are the partners
+                // split over two rows. That depends only on who is at the table, so the panel keeps its height
+                // from turn to turn.
+                androidx.compose.foundation.layout.BoxWithConstraints(Modifier.fillMaxWidth()) {
+                    val labels = partners.map { p -> g.name(p).let { if (it.length > 16) it.take(15) + "\u2026" else it } }
+                    val chipWidth = (maxWidth - 6.dp * (partners.size - 1)) / partners.size
+                    // About 0.54 em per character, plus the chip's padding.
+                    val longest = labels.maxOf { it.length }
+                    val fitSize = (13 downTo 11).firstOrNull { size -> (0.54f * size * longest).dp + 8.dp <= chipWidth }
+                    val oneRow = fitSize != null
+                    val fontSize = (fitSize ?: 13).sp
+                    val perRow = if (oneRow) partners.size else (partners.size + 1) / 2
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        partners.indices.chunked(perRow).forEach { row ->
+                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                row.forEach { k ->
+                                    val p = partners[k]
+                                    PartnerChip(name = labels[k], selected = partner == p, fontSize = fontSize, modifier = Modifier.weight(1f)) {
+                                        onPartner(p)
+                                        // Keep the chosen clue if it is still valid for the new partner.
+                                        if (choice != null && !(g.options.emptyClues || touchesIn(p, choice))) onChoice(null)
+                                    }
+                                }
+                                // A short last row keeps the same chip width as the full ones.
+                                repeat(perRow - row.size) { Spacer(Modifier.weight(1f)) }
+                            }
+                        }
                     }
                 }
             } else {
@@ -680,6 +704,28 @@ private fun CluePanel(
                 )
             }
         }
+    }
+}
+
+@Composable
+private fun PartnerChip(name: String, selected: Boolean, fontSize: androidx.compose.ui.unit.TextUnit, modifier: Modifier, onClick: () -> Unit) {
+    val shape = RoundedCornerShape(8.dp)
+    Box(
+        modifier
+            .height(34.dp)
+            .background(if (selected) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent, shape)
+            .border(BorderStroke(1.dp, if (selected) Color.Transparent else MaterialTheme.colorScheme.outline), shape)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 4.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            name,
+            fontSize = fontSize,
+            maxLines = 1,
+            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+            color = if (selected) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onSurface,
+        )
     }
 }
 
