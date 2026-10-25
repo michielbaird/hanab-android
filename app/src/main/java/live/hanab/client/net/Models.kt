@@ -40,7 +40,12 @@ data class Table(
     val variant: String = "",
     val timed: Boolean = false,
     val options: TableOpts = TableOpts(),
+    /** Who is watching (players of a finished game included, once they are back in the replay). */
+    val spectators: List<SpectatorInfo> = emptyList(),
 )
+
+@Serializable
+data class SpectatorInfo(val name: String = "")
 
 /** The special options of a table, as the server names them (see "Options" in the server). */
 @Serializable
