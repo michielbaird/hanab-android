@@ -11,6 +11,12 @@ if [ -z "${ANDROID_HOME:-}" ]; then
     *) export ANDROID_HOME="$HOME/Android/Sdk" ;;
   esac
 fi
+# The offline-play library (Rust). Without it the app still works, just without "Play offline".
+if command -v cargo >/dev/null; then
+  native/build.sh
+elif [ ! -f app/src/main/jniLibs/arm64-v8a/libhanab_offline.so ]; then
+  echo "WARNING: no cargo and no prebuilt library; this build will not have offline play." >&2
+fi
 [ -f keystore.properties ] || echo "WARNING: no keystore.properties; the output will be UNSIGNED and cannot be installed." >&2
 
 if [ "${1:-}" = "--bundle" ]; then task=bundleRelease; else task=assembleRelease; fi

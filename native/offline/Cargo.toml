@@ -1,0 +1,19 @@
+[package]
+name = "hanab_offline"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+hanab-bot-rs = { git = "https://github.com/michielbaird/hanab-bot-rs", default-features = false }
+jni = "0.21"
+serde_json = "1"
+
+[profile.release]
+opt-level = 3
+lto = true
+strip = true
+panic = "unwind"

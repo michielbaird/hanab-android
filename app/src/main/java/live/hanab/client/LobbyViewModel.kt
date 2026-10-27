@@ -75,6 +75,8 @@ data class LobbyUiState(
     /** Table we are seated at (pregame or in progress). */
     val joinedTableID: Int? = null,
     val game: GameState? = null,
+    /** Playing against bots on this phone: there is no server, so no lobby, chat or reconnecting. */
+    val offline: Boolean = false,
 )
 
 class LobbyViewModel(app: Application) : AndroidViewModel(app) {
@@ -99,7 +101,7 @@ class LobbyViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch { client.errors.collect { e -> _ui.update { it.copy(error = e) } } }
         viewModelScope.launch {
             client.state.collect { s ->
-                val dropped = s == ConnState.Disconnected && _ui.value.loggedIn
+                val dropped = s == ConnState.Disconnected && _ui.value.loggedIn && !_ui.value.offline
                 if (dropped && suspended) {
                     // We closed the socket ourselves after the app sat in the background too long.
                     _ui.update { it.copy(connection = s) }
@@ -117,6 +119,52 @@ class LobbyViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /** Set while an offline game interrupts a signed-in session: the connection is restored afterwards. */
+    private var resumeOnline = false
+
+    /**
+     * Sit down with 1 to 3 bots on this phone. [players] counts you; [fast] is the bots' fast mode (no thinking
+     * pause). Signing in is not needed; if you are signed in, the connection is closed for the game and
+     * restored when you leave it.
+     */
+    fun startOffline(players: Int, convention: String, variant: String, fast: Boolean) {
+        val wasOnline = _ui.value.loggedIn && !_ui.value.offline
+        val app = getApplication<Application>()
+        val variants = app.assets.open("variants.json").bufferedReader().use { it.readText() }
+        val suits = app.assets.open("suits.json").bufferedReader().use { it.readText() }
+        val config = buildJsonObject {
+            put("variant", variant)
+            put("players", players)
+            put("convention", convention)
+            put("seed", System.nanoTime() and 0xFFFFFFL)
+            put("humanName", "You")
+            put("paceMs", if (fast) 900 else 2500)
+        }
+        BotStore.remember(convention, fast)
+        val error = client.startOffline(viewModelScope, variants, suits, config.toString())
+        if (error != null) {
+            _ui.update { it.copy(error = error) }
+            return
+        }
+        // The offline screen first, so closing the socket below is not mistaken for a dropped connection.
+        _ui.value = LobbyUiState(me = Welcome(username = "You"), loggedIn = true, offline = true, connection = ConnState.Connected)
+        if (wasOnline) {
+            resumeOnline = true
+            reconnectJob?.cancel()
+            client.disconnect()
+        }
+    }
+
+    private fun exitOffline() {
+        // Clear the screen first, so the table closing is not mistaken for a dropped connection.
+        _ui.value = LobbyUiState()
+        client.stopOffline()
+        if (resumeOnline) {
+            resumeOnline = false
+            creds.password()?.let { pw -> if (creds.username.isNotBlank()) login(creds.username, pw) }
+        }
+    }
+
     private var reconnectJob: Job? = null
 
     /** True once the connection was closed on purpose because the app stayed out of sight; cleared on return. */
@@ -124,7 +172,7 @@ class LobbyViewModel(app: Application) : AndroidViewModel(app) {
 
     /** The app has been in the background for the whole keep-alive period: close the connection quietly. */
     fun onBackgroundTimeout() {
-        if (!_ui.value.loggedIn) return
+        if (!_ui.value.loggedIn || _ui.value.offline) return
         suspended = true
         reconnectJob?.cancel()
         _ui.update { it.copy(reconnecting = false) }
@@ -161,7 +209,7 @@ class LobbyViewModel(app: Application) : AndroidViewModel(app) {
     fun onForeground() {
         suspended = false
         val s = _ui.value
-        if (s.loggedIn && client.state.value == ConnState.Disconnected && !s.reconnecting && creds.password() != null) {
+        if (s.loggedIn && !s.offline && client.state.value == ConnState.Disconnected && !s.reconnecting && creds.password() != null) {
             _ui.update { it.copy(reconnecting = true) }
             startReconnect()
         }
@@ -424,6 +472,7 @@ class LobbyViewModel(app: Application) : AndroidViewModel(app) {
      * The game's own table id is used, as the "joined" id can lag behind (e.g. after play again).
      */
     fun leaveTable() {
+        if (_ui.value.offline) { exitOffline(); return }
         val ui = _ui.value
         val id = ui.game?.tableID ?: ui.joinedTableID ?: return
         client.send(if (ui.game != null) "tableUnattend" else "tableLeave", buildJsonObject { put("tableID", id) })

@@ -71,6 +71,14 @@ fun LoginScreen(ui: LobbyUiState, vm: LobbyViewModel) {
             ) {
                 if (ui.loggingIn) CircularProgressIndicator(Modifier.padding(2.dp)) else Text("Log in")
             }
+            if (live.hanab.client.NativeOffline.available) {
+                var offline by remember { mutableStateOf(false) }
+                androidx.compose.material3.OutlinedButton(
+                    onClick = { offline = true },
+                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                ) { Text("Play offline against bots") }
+                if (offline) OfflineDialog(onStart = vm::startOffline, onDismiss = { offline = false })
+            }
         }
     }
 }
