@@ -33,7 +33,8 @@ class MainActivity : ComponentActivity() {
     // onPause rather than onStop: a foreground service may only be started while the app is still in front.
     override fun onPause() {
         super.onPause()
-        if (vm.ui.value.loggedIn && !vm.ui.value.offline) KeepAliveService.start(this)
+        // Turning the phone pauses and resumes at once; the app is not leaving.
+        if (!isChangingConfigurations && vm.ui.value.loggedIn && !vm.ui.value.offline) KeepAliveService.start(this)
     }
 
     override fun onResume() {
