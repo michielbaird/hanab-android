@@ -77,6 +77,8 @@ data class LobbyUiState(
     val game: GameState? = null,
     /** Playing against bots on this phone: there is no server, so no lobby, chat or reconnecting. */
     val offline: Boolean = false,
+    /** Player whose profile (history and stats) is on screen. */
+    val profile: String? = null,
 )
 
 class LobbyViewModel(app: Application) : AndroidViewModel(app) {
@@ -117,6 +119,19 @@ class LobbyViewModel(app: Application) : AndroidViewModel(app) {
                 }
             }
         }
+    }
+
+    fun openProfile(name: String) = _ui.update { it.copy(profile = name) }
+
+    fun closeProfile() = _ui.update { it.copy(profile = null) }
+
+    /** Watch a finished game from the history, on our own (a solo replay); the game screen takes over when it loads. */
+    fun openReplay(databaseID: Int) {
+        client.send("replayCreate", buildJsonObject {
+            put("source", "id")
+            put("databaseID", databaseID)
+            put("visibility", "solo")
+        })
     }
 
     /** Set while an offline game interrupts a signed-in session: the connection is restored afterwards. */
