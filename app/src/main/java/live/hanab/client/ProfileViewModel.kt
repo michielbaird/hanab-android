@@ -9,10 +9,11 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import live.hanab.client.net.HistoryRow
+import live.hanab.client.net.GameLine
 import live.hanab.client.net.NoSuchPlayer
-import live.hanab.client.net.ProfileApi
 import live.hanab.client.net.ProfilePage
+import live.hanab.client.net.ProfileApi
+import live.hanab.client.net.ProfileSource
 
 enum class ProfileView { Stats, History }
 
@@ -23,7 +24,7 @@ data class ProfileUi(
     val name: String = "",
     val view: ProfileView = ProfileView.Stats,
 
-    // The stats grid (from the website's profile page).
+    // The stats grid.
     val scores: ProfilePage? = null,
     val scoresLoading: Boolean = false,
     val scoresError: String? = null,
@@ -34,33 +35,46 @@ data class ProfileUi(
     val sortDescending: Boolean = true,
     val gridFilter: String = "",
 
-    // The game history (from the JSON API), one page at a time.
+    // The game history, one page at a time.
     val historyPage: Int = 0,
     val historyLoading: Boolean = false,
     val historyError: String? = null,
     /** Games matching the filters. */
     val historyTotal: Int = 0,
-    val history: List<HistoryRow> = emptyList(),
+    val history: List<GameLine> = emptyList(),
     val players: Int? = null,
-    val variantId: Int? = null,
-    val variantNames: Map<Int, String> = emptyMap(),
+    val variant: String? = null,
+    val variantNames: List<String> = emptyList(),
 ) {
     val historyPages: Int get() = maxOf(1, (historyTotal + ProfileApi.HISTORY_PAGE_SIZE - 1) / ProfileApi.HISTORY_PAGE_SIZE)
 }
 
-/** A player's stats grid and game history. */
+/** A player's stats grid and game history, from the website or from the games played offline. */
 class ProfileViewModel(app: Application) : AndroidViewModel(app) {
     private val _ui = MutableStateFlow(ProfileUi())
     val ui: StateFlow<ProfileUi> = _ui
 
+    private var source: ProfileSource? = null
     private var scoresJob: Job? = null
     private var historyJob: Job? = null
 
-    fun open(name: String) {
-        if (_ui.value.name.equals(name, ignoreCase = true)) return
+    /**
+     * Shows [name] from [source]. Opening the same name again keeps what is on screen (the view, page and filters);
+     * a source that changes while the app runs, like the offline games, is read again.
+     */
+    fun open(name: String, source: ProfileSource) {
+        if (_ui.value.name == name) {
+            if (source.changes) {
+                this.source = source
+                loadScores()
+                if (_ui.value.history.isNotEmpty() || _ui.value.view == ProfileView.History) loadHistory(_ui.value.historyPage)
+            }
+            return
+        }
+        this.source = source
         scoresJob?.cancel()
         historyJob?.cancel()
-        _ui.value = ProfileUi(name = name, variantNames = _ui.value.variantNames)
+        _ui.value = ProfileUi(name = name)
         loadScores()
     }
 
@@ -74,11 +88,12 @@ class ProfileViewModel(app: Application) : AndroidViewModel(app) {
     fun retryScores() = loadScores()
 
     private fun loadScores() {
+        val source = source ?: return
         scoresJob?.cancel()
         scoresJob = viewModelScope.launch {
             _ui.update { it.copy(scoresLoading = true, scoresError = null) }
             try {
-                val page = ProfileApi.scores(_ui.value.name)
+                val page = source.scores()
                 _ui.update { it.copy(scores = page) }
             } catch (e: CancellationException) {
                 throw e
@@ -118,25 +133,26 @@ class ProfileViewModel(app: Application) : AndroidViewModel(app) {
         loadHistory(0)
     }
 
-    fun setVariant(variantId: Int?) {
-        _ui.update { it.copy(variantId = variantId) }
+    fun setVariant(variant: String?) {
+        _ui.update { it.copy(variant = variant) }
         loadHistory(0)
     }
 
     fun retryHistory() = loadHistory(_ui.value.historyPage)
 
     private fun loadHistory(page: Int) {
+        val source = source ?: return
         historyJob?.cancel()
         historyJob = viewModelScope.launch {
             _ui.update { it.copy(historyLoading = true, historyError = null, historyPage = page) }
             try {
                 if (_ui.value.variantNames.isEmpty()) {
-                    val names = ProfileApi.variantNames()
+                    val names = source.variantNames()
                     _ui.update { it.copy(variantNames = names) }
                 }
                 val s = _ui.value
-                val result = ProfileApi.history(s.name, page, s.players, s.variantId)
-                _ui.update { it.copy(historyTotal = result.total, history = result.rows) }
+                val result = source.games(page, s.players, s.variant)
+                _ui.update { it.copy(historyTotal = result.total, history = result.lines) }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {

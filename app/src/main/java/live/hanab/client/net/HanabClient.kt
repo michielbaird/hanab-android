@@ -134,7 +134,18 @@ class HanabClient {
     /** Starts an offline table; returns null on success, otherwise what went wrong. */
     fun startOffline(scope: CoroutineScope, variantsJson: String, suitsJson: String, configJson: String): String? {
         if (!NativeOffline.available) return "Offline play is not available on this phone."
-        val reply = HanabJson.parseToJsonElement(NativeOffline.start(variantsJson, suitsJson, configJson)).jsonObject
+        return attachOffline(scope, NativeOffline.start(variantsJson, suitsJson, configJson))
+    }
+
+    /** Replays a game kept by [live.hanab.client.OfflineStore]; returns null on success, otherwise what went wrong. */
+    fun startOfflineReplay(scope: CoroutineScope, recordJson: String): String? {
+        if (!NativeOffline.available) return "Offline play is not available on this phone."
+        return attachOffline(scope, NativeOffline.startReplay(recordJson))
+    }
+
+    /** Reads messages from the offline table that [reply] (`{"handle": n}` or `{"error": ...}`) started. */
+    private fun attachOffline(scope: CoroutineScope, reply: String): String? {
+        val reply = HanabJson.parseToJsonElement(reply).jsonObject
         reply["error"]?.let { return it.jsonPrimitive.content }
         val handle = reply["handle"]?.jsonPrimitive?.long ?: return "Offline play could not start."
         offlineHandle = handle

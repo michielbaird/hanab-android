@@ -82,6 +82,33 @@ pub extern "system" fn Java_live_hanab_client_NativeOffline_start<'l>(
     to_java(&mut env, &reply.to_string())
 }
 
+/// Starts a replay of a saved game (the record the table sent when it ended). Returns `{"handle": n}` or
+/// `{"error": "..."}`.
+#[no_mangle]
+pub extern "system" fn Java_live_hanab_client_NativeOffline_startReplay<'l>(
+    mut env: JNIEnv<'l>,
+    _class: JClass<'l>,
+    record_json: JString<'l>,
+) -> jstring {
+    let record = text(&mut env, &record_json);
+    let reply = match serde_json::from_str::<Value>(&record) {
+        Ok(record) if record["actions"].is_array() => {
+            static NEXT_REPLAY: OnceLock<Mutex<i64>> = OnceLock::new();
+            let mut next = NEXT_REPLAY.get_or_init(|| Mutex::new(1 << 40)).lock().unwrap();
+            *next += 1;
+            let handle = *next;
+            let (tx, rx) = channel();
+            let out = Arc::new(Outbox::new());
+            table::spawn_replay(record, rx, Arc::clone(&out));
+            tables().lock().unwrap().insert(handle, Running { tx, out });
+            json!({"handle": handle})
+        }
+        Ok(_) => json!({"error": "That saved game has no moves."}),
+        Err(e) => json!({"error": e.to_string()}),
+    };
+    to_java(&mut env, &reply.to_string())
+}
+
 /// Passes one command of the app to the table.
 #[no_mangle]
 pub extern "system" fn Java_live_hanab_client_NativeOffline_send<'l>(
@@ -141,7 +168,7 @@ mod tests {
 
     /// Plays the app's part: the hand-shake, then a simple human who discards (or clues at 8 clues).
     /// Returns an error instead of panicking, so a sweep can report every failing variant.
-    fn play_scripted(variant: &str, players: usize, seed: u64, check_rules: bool) -> Result<(), String> {
+    fn play_scripted(variant: &str, players: usize, seed: u64, check_rules: bool) -> Result<Value, String> {
         let config = format!(r#"{{"variant":{variant:?},"players":{players},"convention":"HGroup1","seed":{seed},"paceMs":0}}"#);
         let h = start(VARIANTS, SUITS, &config)?;
         let result = std::panic::catch_unwind(|| scripted_game(h, players, check_rules)).unwrap_or_else(|_| Err("panic".into()));
@@ -149,7 +176,7 @@ mod tests {
         result
     }
 
-    fn scripted_game(h: i64, players: usize, check_rules: bool) -> Result<(), String> {
+    fn scripted_game(h: i64, players: usize, check_rules: bool) -> Result<Value, String> {
         let wait = |what: &str| -> Result<Value, String> {
             let out = tables().lock().unwrap().get(&h).map(|t| Arc::clone(&t.out)).ok_or("gone")?;
             let msg = out.pop(Duration::from_secs(60)).ok_or(format!("went quiet waiting for {what}"))?;
@@ -214,13 +241,14 @@ mod tests {
                     value = value % 5 + 1;
                     send(h, "action", json!({"tableID": 1, "type": 3, "target": other, "value": value}));
                 }
+                "offlineRecord" => return Ok(m["data"].clone()),
                 "gameAction" => {
                     let a = &m["data"]["action"];
                     match a["type"].as_str().unwrap() {
                         "status" => clues = a["clues"].as_i64().unwrap(),
                         "draw" if a["playerIndex"] == me => mine.push(a["order"].as_i64().unwrap()),
                         "play" | "discard" if a["playerIndex"] == me => mine.retain(|&o| o != a["order"].as_i64().unwrap()),
-                        "gameOver" => return Ok(()),
+                        "gameOver" => {}
                         "turn" if a["currentPlayerIndex"] == me => {
                             moves += 1;
                             if probe {
@@ -249,7 +277,29 @@ mod tests {
 
     #[test]
     fn plays_a_whole_game_with_bots() {
-        play_scripted("No Variant", 3, 5, true).unwrap();
+        let record = play_scripted("No Variant", 3, 5, true).unwrap();
+        assert_eq!(record["variant"], "No Variant");
+        assert_eq!(record["names"].as_array().unwrap().len(), 3);
+        assert!(record["endCondition"] == 1 || record["endCondition"] == 2);
+        let actions = record["actions"].as_array().unwrap();
+        assert!(actions.len() > 17);
+        assert_eq!(actions.last().unwrap()["currentPlayerIndex"], -1);
+        // A replay shows every card, including the ones the human was dealt.
+        assert!(actions.iter().filter(|a| a["type"] == "draw").all(|a| a["suitIndex"] != -1));
+
+        // ...and the saved game plays back through the same hand-shake as a real replay.
+        let (tx, rx) = channel();
+        let out = Arc::new(Outbox::new());
+        table::spawn_replay(record.clone(), rx, Arc::clone(&out));
+        let next = || out.pop(Duration::from_secs(10)).expect("the replay went quiet");
+        assert!(next().starts_with("tableStart"));
+        tx.send(Event::Human("getGameInfo1".into(), Value::Null)).unwrap();
+        let init = next();
+        assert!(init.starts_with("init") && init.contains("\"spectating\":true"));
+        tx.send(Event::Human("getGameInfo2".into(), Value::Null)).unwrap();
+        let list: Value = serde_json::from_str(next().strip_prefix("gameActionList ").unwrap()).unwrap();
+        assert_eq!(list["list"].as_array().unwrap().len(), actions.len());
+        tx.send(Event::Close).unwrap();
     }
 
     /// Every variant the app offers offline, with 2 to 4 players. Slow; run with `--ignored`.

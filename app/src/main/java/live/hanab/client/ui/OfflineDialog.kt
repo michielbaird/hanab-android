@@ -27,7 +27,11 @@ import live.hanab.client.game.Variants
 
 /** Choose who to play against offline: the table size, the bots' conventions and the variant. */
 @Composable
-fun OfflineDialog(onStart: (players: Int, convention: String, variant: String, fast: Boolean) -> Unit, onDismiss: () -> Unit) {
+fun OfflineDialog(
+    onStart: (players: Int, convention: String, variant: String, fast: Boolean) -> Unit,
+    onStats: () -> Unit,
+    onDismiss: () -> Unit,
+) {
     var players by remember { mutableIntStateOf(3) }
     var convention by remember { mutableStateOf(BotStore.convention) }
     var variant by remember { mutableStateOf("No Variant") }
@@ -75,6 +79,11 @@ fun OfflineDialog(onStart: (players: Int, convention: String, variant: String, f
         confirmButton = {
             TextButton(onClick = { onStart(players, convention, variant, fast); onDismiss() }) { Text("Start") }
         },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+        dismissButton = {
+            Row {
+                TextButton(onClick = { onStats(); onDismiss() }) { Text("Offline stats") }
+                TextButton(onClick = onDismiss) { Text("Cancel") }
+            }
+        },
     )
 }

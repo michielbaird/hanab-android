@@ -77,7 +77,7 @@ fun LoginScreen(ui: LobbyUiState, vm: LobbyViewModel) {
                     onClick = { offline = true },
                     modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
                 ) { Text("Play offline against bots") }
-                if (offline) OfflineDialog(onStart = vm::startOffline, onDismiss = { offline = false })
+                if (offline) OfflineDialog(onStart = vm::startOffline, onStats = vm::openOfflineStats, onDismiss = { offline = false })
             }
         }
     }

@@ -15,6 +15,9 @@ object NativeOffline {
     /** Starts a table. Returns `{"handle": n}` or `{"error": "..."}`. */
     external fun start(variantsJson: String, suitsJson: String, configJson: String): String
 
+    /** Starts a replay of a game the table sent as an `offlineRecord`. Returns `{"handle": n}` or `{"error": "..."}`. */
+    external fun startReplay(recordJson: String): String
+
     /** Passes one command of the app (`getGameInfo1`, `action`, ...) to the table. */
     external fun send(handle: Long, command: String, dataJson: String)
 
