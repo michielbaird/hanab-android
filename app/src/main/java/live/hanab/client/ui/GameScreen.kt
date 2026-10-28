@@ -543,6 +543,7 @@ private fun GameBoard(live: GameState, vm: LobbyViewModel, ui: LobbyUiState) {
         TerminateDialog(
             voted = ui.terminateVote,
             players = live.numPlayers,
+            offline = ui.offline,
             onVote = { vm.voteToTerminate() },
             onTerminate = { vm.terminateNow(); showTerminate = false },
             onDismiss = { showTerminate = false },
@@ -1509,7 +1510,14 @@ fun ErrorBanner(text: String, onDismiss: () -> Unit) {
  * takes two taps, since it can't be undone, and counts as a loss.
  */
 @Composable
-private fun TerminateDialog(voted: Boolean, players: Int, onVote: () -> Unit, onTerminate: () -> Unit, onDismiss: () -> Unit) {
+private fun TerminateDialog(
+    voted: Boolean,
+    players: Int,
+    offline: Boolean,
+    onVote: () -> Unit,
+    onTerminate: () -> Unit,
+    onDismiss: () -> Unit,
+) {
     var sure by remember { mutableStateOf(false) }
     val needed = if (players == 2) "both players" else "at least half of the players"
     AlertDialog(
@@ -1517,22 +1525,27 @@ private fun TerminateDialog(voted: Boolean, players: Int, onVote: () -> Unit, on
         title = { Text("End this game?") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("Vote to terminate: the game ends when $needed have voted. You can take your vote back.", style = MaterialTheme.typography.bodyMedium)
-                Text(if (voted) "You have voted to terminate." else "You have not voted.", style = MaterialTheme.typography.labelLarge)
-                Text("End now: the game ends immediately for everyone and counts as a loss.", style = MaterialTheme.typography.bodyMedium)
+                if (offline) {
+                    // Only the bots are with you: there is nobody to vote with.
+                    Text("The game ends now and is not kept in your offline stats.", style = MaterialTheme.typography.bodyMedium)
+                } else {
+                    Text("Vote to terminate: the game ends when $needed have voted. You can take your vote back.", style = MaterialTheme.typography.bodyMedium)
+                    Text(if (voted) "You have voted to terminate." else "You have not voted.", style = MaterialTheme.typography.labelLarge)
+                    Text("End now: the game ends immediately for everyone and counts as a loss.", style = MaterialTheme.typography.bodyMedium)
+                }
             }
         },
         confirmButton = {
             Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 androidx.compose.material3.FilledTonalButton(onClick = onDismiss, modifier = Modifier.fillMaxWidth()) { Text("Cancel") }
-                OutlinedButton(onClick = onVote, modifier = Modifier.fillMaxWidth()) {
+                if (!offline) OutlinedButton(onClick = onVote, modifier = Modifier.fillMaxWidth()) {
                     Text(if (voted) "Withdraw my vote" else "Vote to terminate")
                 }
                 Button(
                     onClick = { if (sure) onTerminate() else sure = true },
                     modifier = Modifier.fillMaxWidth(),
                     colors = androidx.compose.material3.ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
-                ) { Text(if (sure) "Tap again to end the game" else "End the game now") }
+                ) { Text(if (sure) "Tap again to end the game" else if (offline) "End the game" else "End the game now") }
             }
         },
     )
