@@ -40,8 +40,15 @@ are not offered when creating a table.
 **Bots**
 Built for hosting [scala-bot](https://github.com/will-hanabi-bot/scala-bot): mark a user as a bot in the
 Users tab, then use **Invite bots** in the pregame. The app sets the conventions and fast mode, then
-joins the bot to your table by private message. You can also kick bots, set conventions for all of
-them, and ask a bot to analyze a finished game.
+joins the bot to your table by private message. You can also kick bots and set conventions for all of
+them.
+
+**Analysis**
+**Analyze** (at the end of a game, and next to each game in a profile's history or in the offline
+stats) has the bot go through a finished game on the phone itself and list every move it would have
+played differently, with the clear mistakes marked. It works for games of the website and for games
+played offline, with no bot online and, for offline games, no connection. It uses the same native
+library as offline play (see "Offline play") and can take a minute or more.
 
 ## Building
 

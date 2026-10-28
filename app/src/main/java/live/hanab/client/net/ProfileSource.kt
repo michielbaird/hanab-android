@@ -19,6 +19,8 @@ data class GameLine(
     val others: List<String>,
     /** A word of extra detail, e.g. the bots' convention offline. */
     val note: String? = null,
+    /** The conventions the bots played, for a game played offline. */
+    val convention: String? = null,
 )
 
 data class GameLines(val total: Int, val lines: List<GameLine>)
@@ -72,7 +74,7 @@ class OfflineSource(private val context: Context) : ProfileSource {
         return GameLines(
             matching.size,
             matching.drop(page * size).take(size).map { g ->
-                GameLine(g.id, dateOf(g.id), g.players, g.variant, g.score, g.maxScore, g.others(), listOf(g.convention, g.seed).filter { it.isNotEmpty() }.joinToString(" · "))
+                GameLine(g.id, dateOf(g.id), g.players, g.variant, g.score, g.maxScore, g.others(), listOf(g.convention, g.seed).filter { it.isNotEmpty() }.joinToString(" · "), g.convention)
             },
         )
     }

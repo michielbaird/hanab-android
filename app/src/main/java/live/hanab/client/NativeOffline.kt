@@ -18,6 +18,12 @@ object NativeOffline {
     /** Starts a replay of a game the table sent as an `offlineRecord`. Returns `{"handle": n}` or `{"error": "..."}`. */
     external fun startReplay(recordJson: String): String
 
+    /**
+     * Has the bot go through a finished game (the website's export or an offline record) and comment on the moves it
+     * would have played differently. Slow: call it off the main thread. Returns `{"players", "comments"}` or `{"error"}`.
+     */
+    external fun analyze(variantsJson: String, suitsJson: String, gameJson: String, variant: String, convention: String): String
+
     /** Passes one command of the app (`getGameInfo1`, `action`, ...) to the table. */
     external fun send(handle: Long, command: String, dataJson: String)
 

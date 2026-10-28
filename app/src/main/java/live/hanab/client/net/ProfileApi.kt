@@ -79,6 +79,9 @@ object ProfileApi {
         }
     }
 
+    /** The website's export of a finished game (players, deck and every action), as text. */
+    suspend fun export(id: Long): String = withContext(Dispatchers.IO) { get("https://$BASE_HOST/export/$id", json = false) }
+
     /** Variant id to name, fetched once. */
     suspend fun variantNames(): Map<Int, String> {
         variants?.let { return it }

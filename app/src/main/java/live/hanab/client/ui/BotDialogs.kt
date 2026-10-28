@@ -110,57 +110,6 @@ fun SetAllBotsDialog(onSet: (String) -> Unit, onDismiss: () -> Unit) {
     )
 }
 
-/** Pick a bot and conventions, then ask it to analyse the finished game. */
-@Composable
-fun AnalyzeDialog(
-    onlineBots: List<String>,
-    onAnalyze: (bot: String, convention: String) -> Unit,
-    onDismiss: () -> Unit,
-) {
-    var bot by remember { mutableStateOf(onlineBots.firstOrNull()) }
-    var convention by remember { mutableStateOf(BotStore.convention) }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Analyze this game") },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                if (onlineBots.isEmpty()) {
-                    Text("None of your bots is online.")
-                } else {
-                    Text("Bot", style = MaterialTheme.typography.labelLarge)
-                    FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        onlineBots.forEach { b -> FilterChip(bot == b, { bot = b }, { Text(b) }) }
-                    }
-                    Text("Conventions", style = MaterialTheme.typography.labelLarge)
-                    ConventionPicker(convention) { convention = it }
-                }
-            }
-        },
-        confirmButton = {
-            Button(onClick = { bot?.let { onAnalyze(it, convention) }; onDismiss() }, enabled = bot != null) { Text("Analyze") }
-        },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
-    )
-}
-
-/** The bot's replies to "/analyze": a status line, then a list of suggestions, then "Analysis completed." */
-@Composable
-fun AnalysisDialog(ui: LobbyUiState, vm: LobbyViewModel) {
-    val bot = ui.analysisBot ?: return
-    val replies = ui.pms[bot].orEmpty().drop(ui.analysisFrom).filter { !it.who.equals(ui.me?.username, true) }
-    AlertDialog(
-        onDismissRequest = vm::closeAnalysis,
-        title = { Text("Analysis by $bot") },
-        text = {
-            Column(Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                if (replies.isEmpty()) Text("Waiting for $bot...")
-                replies.forEach { Text(LobbyViewModel.plain(it.msg), style = MaterialTheme.typography.bodyMedium) }
-            }
-        },
-        confirmButton = { TextButton(onClick = vm::closeAnalysis) { Text("Close") } },
-    )
-}
-
 /** Tap menu for a user in the Users list. */
 @Composable
 fun UserMenuDialog(name: String, online: Boolean, onProfile: () -> Unit, onMessage: () -> Unit, onDismiss: () -> Unit) {

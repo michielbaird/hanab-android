@@ -70,12 +70,28 @@ class MainActivity : ComponentActivity() {
                         ui.offlineStats && !ui.offline -> live.hanab.client.ui.ProfileScreen(
                             "Offline games", remember(context) { live.hanab.client.net.OfflineSource(context) },
                             onBack = vm::closeOfflineStats, onOpenReplay = vm::openOfflineReplay,
+                            onAnalyze = { line ->
+                                vm.askAnalysis(
+                                    live.hanab.client.AnalysisRequest(
+                                        "${line.variant} · ${line.date}", line.variant,
+                                        line.convention ?: live.hanab.client.BotStore.convention, online = false, id = line.id,
+                                    ),
+                                )
+                            },
                         )
                         !ui.loggedIn -> LoginScreen(ui, vm)
                         game != null -> GameScreen(ui, game, vm)
                         ui.profile != null && !ui.offline -> live.hanab.client.ui.ProfileScreen(
                             ui.profile!!, live.hanab.client.net.OnlineSource(ui.profile!!),
                             onBack = vm::closeProfile, onOpenReplay = { vm.openReplay(it.toInt()) },
+                            onAnalyze = { line ->
+                                vm.askAnalysis(
+                                    live.hanab.client.AnalysisRequest(
+                                        "${line.variant} · ${line.date} · ${ui.profile}", line.variant,
+                                        live.hanab.client.BotStore.convention, online = true, id = line.id,
+                                    ),
+                                )
+                            },
                         )
                         ui.offline -> androidx.compose.material3.Text(
                             "Dealing...", Modifier.align(androidx.compose.ui.Alignment.Center),
@@ -83,6 +99,7 @@ class MainActivity : ComponentActivity() {
                         ui.joinedTableID != null -> PregameScreen(ui, vm)
                         else -> LobbyScreen(ui, vm)
                     }
+                    live.hanab.client.ui.AnalysisDialog(ui.analysis, vm, inGame = ui.game != null)
                     if (ui.reconnecting) {
                         androidx.compose.material3.Surface(
                             color = androidx.compose.ui.graphics.Color(0xFFFFB300),
