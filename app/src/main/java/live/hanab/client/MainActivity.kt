@@ -65,6 +65,9 @@ class MainActivity : ComponentActivity() {
                     when {
                         !ui.loggedIn -> LoginScreen(ui, vm)
                         game != null -> GameScreen(ui, game, vm)
+                        ui.profile != null && !ui.offline -> live.hanab.client.ui.ProfileScreen(
+                            ui.profile!!, onBack = vm::closeProfile, onOpenReplay = vm::openReplay,
+                        )
                         ui.offline -> androidx.compose.material3.Text(
                             "Dealing...", Modifier.align(androidx.compose.ui.Alignment.Center),
                         )

@@ -163,13 +163,14 @@ fun AnalysisDialog(ui: LobbyUiState, vm: LobbyViewModel) {
 
 /** Tap menu for a user in the Users list. */
 @Composable
-fun UserMenuDialog(name: String, online: Boolean, onMessage: () -> Unit, onDismiss: () -> Unit) {
+fun UserMenuDialog(name: String, online: Boolean, onProfile: () -> Unit, onMessage: () -> Unit, onDismiss: () -> Unit) {
     val isBot = BotStore.isBot(name)
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(name) },
         text = {
             Column {
+                TextButton(onClick = { onProfile(); onDismiss() }, Modifier.fillMaxWidth()) { Text("View profile") }
                 if (online) TextButton(onClick = { onMessage(); onDismiss() }, Modifier.fillMaxWidth()) { Text("Send message") }
                 TextButton(
                     onClick = { if (isBot) BotStore.unmark(name) else BotStore.mark(name); onDismiss() },

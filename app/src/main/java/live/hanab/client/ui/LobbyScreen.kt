@@ -89,7 +89,7 @@ fun LobbyScreen(ui: LobbyUiState, vm: LobbyViewModel) {
             when (tab) {
                 0 -> TablesTab(ui, vm)
                 1 -> ChatTab(ui, vm)
-                2 -> UsersTab(ui) { name -> vm.openPm(name); tab = 3 }
+                2 -> UsersTab(ui, onProfile = vm::openProfile) { name -> vm.openPm(name); tab = 3 }
                 else -> PmTab(ui, vm)
             }
         }
@@ -231,7 +231,7 @@ private fun ChatTab(ui: LobbyUiState, vm: LobbyViewModel) {
 }
 
 @Composable
-private fun UsersTab(ui: LobbyUiState, onPm: (String) -> Unit) {
+private fun UsersTab(ui: LobbyUiState, onProfile: (String) -> Unit, onPm: (String) -> Unit) {
     var menuFor by remember { mutableStateOf<String?>(null) }
     val onlineNames = ui.users.values.map { it.name.lowercase() }.toSet()
     // Marked bots first, then everyone else by name; bots that are offline are listed below.
@@ -264,6 +264,7 @@ private fun UsersTab(ui: LobbyUiState, onPm: (String) -> Unit) {
         UserMenuDialog(
             name = name,
             online = name.lowercase() in onlineNames,
+            onProfile = { onProfile(name) },
             onMessage = { onPm(name) },
             onDismiss = { menuFor = null },
         )
