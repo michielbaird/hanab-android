@@ -144,15 +144,29 @@ class LobbyViewModel(app: Application) : AndroidViewModel(app) {
      * pause). Signing in is not needed; if you are signed in, the connection is closed for the game and
      * restored when you leave it.
      */
-    fun startOffline(players: Int, convention: String, variant: String, fast: Boolean) {
+    fun startOffline(players: Int, convention: String, variant: String, fast: Boolean, seed: String) {
         val app = getApplication<Application>()
+        // A whole seed as the website shows it (p3v0s258) says its own players and variant; the rest is the suffix.
+        val full = Regex("""^p(\d+)v(\d+)s(.+)$""").find(seed.trim())
+        val seedPlayers = full?.groupValues?.get(1)?.toInt()
+        val seedVariant = full?.groupValues?.get(2)?.toInt()?.let { Variants.nameOfId(it) }
+        if (full != null && (seedPlayers !in 2..4 || seedVariant == null || seedVariant !in Variants.botSupported())) {
+            _ui.update {
+                it.copy(error = "Offline games are for 2 to 4 players in a variant the bots can play; that seed is not one (${seed.trim()}).")
+            }
+            return
+        }
+        val players = seedPlayers ?: players
+        val variant = seedVariant ?: variant
+        val seed = full?.groupValues?.get(3) ?: seed
         val variants = app.assets.open("variants.json").bufferedReader().use { it.readText() }
         val suits = app.assets.open("suits.json").bufferedReader().use { it.readText() }
         val config = buildJsonObject {
             put("variant", variant)
             put("players", players)
             put("convention", convention)
-            put("seed", System.nanoTime() and 0xFFFFFFL)
+            // The same seed deals the same cards as the website does for it; none given: the next one not yet played.
+            put("seed", seed.trim().ifEmpty { nextUnplayedSeed(OfflineStore.all(app), players, variant) })
             put("humanName", "You")
             put("paceMs", if (fast) 900 else 2500)
         }

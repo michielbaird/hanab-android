@@ -40,6 +40,7 @@ object Variants {
     private var suitInfos: Map<String, SuitInfo> = emptyMap()
     private var suitsByVariant: Map<String, List<String>> = emptyMap()
     private var supportedNames: List<String> = emptyList()
+    private var namesById: Map<Int, String> = emptyMap()
 
     /** Suits we cannot model yet (changed copy counts, inverted stacks, rank-dependent colours). */
     private val unsupportedSuits = mutableSetOf<String>()
@@ -94,19 +95,25 @@ object Variants {
         suitInfos = infos
 
         val byName = mutableMapOf<String, List<String>>()
+        val byId = mutableMapOf<Int, String>()
         val ok = mutableListOf<String>()
         for (el in Json.parseToJsonElement(variantsText).jsonArray) {
             val o = el.jsonObject
             val name = o.str("name") ?: continue
             val suits = (o["suits"] as? JsonArray)?.map { it.jsonPrimitive.content } ?: continue
             byName[name] = suits
+            (o["id"] as? JsonPrimitive)?.content?.toIntOrNull()?.let { byId[it] = name }
             if (o.keys.all { it in plainKeys } && suits.all { it in infos && it !in unsupportedSuits }) ok += name
         }
         suitsByVariant = byName
+        namesById = byId
         supportedNames = ok
     }
 
     fun suits(variant: String): List<String>? = suitsByVariant[variant]
+
+    /** The variant the website numbers [id] (the "v0" of a seed like p3v0s258), if there is one. */
+    fun nameOfId(id: Int): String? = namesById[id]
 
     fun info(suit: String): SuitInfo = suitInfos[suit] ?: SuitInfo(suit)
 

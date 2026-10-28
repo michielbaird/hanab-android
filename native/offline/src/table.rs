@@ -19,6 +19,8 @@ use hanab_bot::basics::state::TableOptions;
 use hanab_bot::basics::{Convention, Game, Identity, PerformAction, State, Variant, HAND_SIZE};
 use hanab_bot::settings::ConventionKind;
 use hanab_bot::tools::self_play::{full_deck, Rng};
+
+use crate::seed;
 use serde_json::{json, Value};
 
 const TABLE_ID: usize = 1;
@@ -29,7 +31,8 @@ pub struct Config {
     /// Everyone at the table, the human included (2 to 4).
     pub players: usize,
     pub convention: String,
-    pub seed: u64,
+    /// The part of the seed the player picks (`50` in `p3v0s50`); the table builds the rest. Any text.
+    pub seed_suffix: String,
     pub human_name: String,
     /// Pause after each bot move, so the app can animate it.
     pub pace_ms: u64,
@@ -86,7 +89,8 @@ struct Table<'a> {
     cfg: &'a Config,
     /// Where the human sits; chosen at random for each game, so sometimes a bot starts.
     human: usize,
-    seed: u64,
+    /// The seed the way the site names it, e.g. `p3v0s50`; it decides the deal.
+    seed: String,
     out: &'a Outbox,
     rx: &'a Receiver<Event>,
     variant: Arc<Variant>,
@@ -116,12 +120,13 @@ pub fn run(cfg: Config, rx: Receiver<Event>, out: Arc<Outbox>) {
             return;
         }
     };
-    let mut seed = cfg.seed;
+    let mut suffix = cfg.seed_suffix.clone();
     loop {
-        let mut table = Table::new(&cfg, seed, &variant, &conv, &rx, &out);
+        let mut table = Table::new(&cfg, &suffix, &variant, &conv, &rx, &out);
         let end = catch_unwind(AssertUnwindSafe(|| table.play()));
         match end {
-            Ok(End::Over) if table.wait_for_rematch() => seed += 1,
+            // A rematch is the next deal of the series, as on the site.
+            Ok(End::Over) if table.wait_for_rematch() => suffix = seed::next_suffix(&suffix),
             Ok(_) => break,
             Err(_) => {
                 out.push("warning", json!({"warning": "The offline game stopped because of an internal error."}));
@@ -135,18 +140,23 @@ pub fn run(cfg: Config, rx: Receiver<Event>, out: Arc<Outbox>) {
 impl<'a> Table<'a> {
     fn new(
         cfg: &'a Config,
-        seed: u64,
+        suffix: &str,
         variant: &Arc<Variant>,
         conv: &Arc<dyn Convention>,
         rx: &'a Receiver<Event>,
         out: &'a Outbox,
     ) -> Self {
         let num = cfg.players;
-        let human = Rng::new(seed ^ 0x5EA7).below(num);
-        let mut names = bot_names(seed, num - 1, &cfg.human_name);
-        names.insert(human, cfg.human_name.clone());
+        // The same seed deals the same cards, seats you in the same place and names the bots the same.
+        let seed = seed::seed_name(num, variant.id, suffix);
+        let numeric = seed::numeric(&seed);
+        // You made the table and the bots joined after you; the seed then shuffles the seating, as on the site.
+        let joined: Vec<String> =
+            std::iter::once(cfg.human_name.clone()).chain(bot_names(numeric, num - 1, &cfg.human_name)).collect();
         let mut deck = full_deck(variant);
-        Rng::new(seed).shuffle(&mut deck);
+        let seats = seed::deal(&mut deck, num, &seed);
+        let human = seats.iter().position(|&who| who == 0).unwrap_or(0);
+        let names: Vec<String> = seats.iter().map(|&who| joined[who].clone()).collect();
 
         let options = TableOptions::new(num, &variant.name);
         let games: Vec<Game> = (0..num)
@@ -242,7 +252,7 @@ impl<'a> Table<'a> {
             "init",
             json!({
                 "tableID": TABLE_ID, "playerNames": self.names, "ourPlayerIndex": self.human, "spectating": false,
-                "replay": false, "sharedReplay": false, "seed": format!("offline-{}", self.seed),
+                "replay": false, "sharedReplay": false, "seed": self.seed,
                 "options": opts, "characterAssignments": [], "characterMetadata": [],
             }),
         );
@@ -566,7 +576,7 @@ pub fn run_replay(record: Value, rx: Receiver<Event>, out: Arc<Outbox>) {
             "init",
             json!({
                 "tableID": TABLE_ID, "playerNames": record["names"], "ourPlayerIndex": record["human"], "spectating": true,
-                "replay": true, "sharedReplay": false, "seed": format!("offline-{}", record["seed"]),
+                "replay": true, "sharedReplay": false, "seed": record["seed"],
                 "options": opts, "characterAssignments": [], "characterMetadata": [],
             }),
         );

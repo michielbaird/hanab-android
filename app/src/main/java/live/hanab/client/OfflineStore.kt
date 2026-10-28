@@ -26,6 +26,8 @@ data class OfflineGame(
     /** 1 played out, 2 struck out. */
     val endCondition: Int,
     val durationMs: Long,
+    /** The seed the way the website names it, like "p3v0s50"; empty for games kept before seeds. */
+    val seed: String = "",
 ) {
     val players: Int get() = names.size
     val struckOut: Boolean get() = endCondition == 2
@@ -57,6 +59,7 @@ object OfflineStore {
             maxScore = o.getValue("maxScore").jsonPrimitive.content.toInt(),
             endCondition = o.getValue("endCondition").jsonPrimitive.content.toInt(),
             durationMs = o.getValue("durationMs").jsonPrimitive.content.toLong(),
+            seed = o["seed"]?.jsonPrimitive?.content.orEmpty(),
         )
         synchronized(lock) {
             GZIPOutputStream(File(dir(context), "${game.id}.json.gz").outputStream()).bufferedWriter().use { it.write(recordJson) }
@@ -79,4 +82,17 @@ object OfflineStore {
         val file = File(dir(context), "$id.json.gz")
         if (!file.exists()) null else GZIPInputStream(file.inputStream()).bufferedReader().use { it.readText() }
     }
+}
+
+private val SEED_NAME = Regex("""^p\d+v\d+s(.*)$""")
+
+/**
+ * The seed to play when none is chosen, found as the website does: the lowest number (1, 2, 3, ...) that has not
+ * been played yet at this table size in this variant.
+ */
+fun nextUnplayedSeed(games: List<OfflineGame>, players: Int, variant: String): String {
+    val played = games.filter { it.players == players && it.variant == variant }
+        .mapNotNull { SEED_NAME.find(it.seed)?.groupValues?.get(1) }
+        .toSet()
+    return generateSequence(1) { it + 1 }.first { it.toString() !in played }.toString()
 }

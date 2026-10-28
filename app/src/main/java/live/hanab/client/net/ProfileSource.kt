@@ -72,7 +72,7 @@ class OfflineSource(private val context: Context) : ProfileSource {
         return GameLines(
             matching.size,
             matching.drop(page * size).take(size).map { g ->
-                GameLine(g.id, dateOf(g.id), g.players, g.variant, g.score, g.maxScore, g.others(), g.convention)
+                GameLine(g.id, dateOf(g.id), g.players, g.variant, g.score, g.maxScore, g.others(), listOf(g.convention, g.seed).filter { it.isNotEmpty() }.joinToString(" · "))
             },
         )
     }

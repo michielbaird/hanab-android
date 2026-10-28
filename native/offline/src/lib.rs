@@ -1,4 +1,6 @@
 //! JNI surface of the offline table: start a game, send the app's commands, poll for the table's messages.
+mod rng_cooked;
+mod seed;
 mod table;
 
 use std::collections::HashMap;
@@ -25,15 +27,30 @@ fn tables() -> &'static Mutex<HashMap<i64, Running>> {
     TABLES.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
+/// The variant tables are loaded once per process (they do not change, and loading them again while a table
+/// reads them is not safe).
+fn init_variants(variants: &str, suits: &str) -> Result<(), String> {
+    static LOADED: OnceLock<Result<(), String>> = OnceLock::new();
+    LOADED.get_or_init(|| Variant::init(variants, suits)).clone()
+}
+
 fn start(variants: &str, suits: &str, config: &str) -> Result<i64, String> {
     logger::set_default_level(LogLevel::Off);
     let c: Value = serde_json::from_str(config).map_err(|e| e.to_string())?;
-    Variant::init(variants, suits)?;
-    let cfg = Config {
+    init_variants(variants, suits)?;
+    let mut cfg = Config {
         variant: c["variant"].as_str().unwrap_or("No Variant").to_string(),
         players: c["players"].as_u64().unwrap_or(3) as usize,
         convention: c["convention"].as_str().unwrap_or("HGroup5").to_string(),
-        seed: c["seed"].as_u64().unwrap_or(1),
+        // The part after the "s" of a seed name like p3v0s50: any text, or a number. Random if none is given.
+        seed_suffix: match &c["seed"] {
+            Value::String(t) if !t.trim().is_empty() => t.trim().to_string(),
+            Value::Number(n) => n.to_string(),
+            _ => std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(1, |d| d.as_millis() as u64 % 1_000_000)
+                .to_string(),
+        },
         human_name: c["humanName"].as_str().unwrap_or("You").to_string(),
         pace_ms: c["paceMs"].as_u64().unwrap_or(900),
     };
@@ -41,7 +58,14 @@ fn start(variants: &str, suits: &str, config: &str) -> Result<i64, String> {
         return Err("Offline games are for 2 to 4 players.".into());
     }
     // Reject a bad variant or convention now rather than on the table's own thread.
-    Variant::get(&cfg.variant)?;
+    let variant = Variant::get(&cfg.variant)?;
+    // A whole seed (p3v0s258) must be for this table; its suffix is what the table builds the name from.
+    if let Some((players, variant_id, suffix)) = seed::split_name(&cfg.seed_suffix) {
+        if players != cfg.players || variant_id != variant.id {
+            return Err(format!("That seed is for {players} players and variant {variant_id}, not this table."));
+        }
+        cfg.seed_suffix = suffix.to_string();
+    }
     table::convention(&cfg.convention)?;
 
     static NEXT: OnceLock<Mutex<i64>> = OnceLock::new();
@@ -300,6 +324,76 @@ mod tests {
         let list: Value = serde_json::from_str(next().strip_prefix("gameActionList ").unwrap()).unwrap();
         assert_eq!(list["list"].as_array().unwrap().len(), actions.len());
         tx.send(Event::Close).unwrap();
+    }
+
+    /// The table deals what the website dealt for the same seed: the cards the human can see are the real ones.
+    #[test]
+    fn a_seeded_table_deals_the_sites_cards() {
+        let games: Vec<Value> = serde_json::from_str(include_str!("../tests/data/seeded_games.json")).unwrap();
+        let g = games.iter().find(|g| g["variant"] == "No Variant" && g["players"] == 3).unwrap();
+        let seed = g["seed"].as_str().unwrap(); // e.g. "p3v0s861"
+        let suffix = seed.split_once('s').unwrap().1;
+        let config = format!(r#"{{"variant":"No Variant","players":3,"convention":"HGroup1","seed":"{suffix}","paceMs":0}}"#);
+        let h = start(VARIANTS, SUITS, &config).unwrap();
+        let out = tables().lock().unwrap().get(&h).map(|t| Arc::clone(&t.out)).unwrap();
+        let next = || {
+            let m = out.pop(Duration::from_secs(10)).expect("the table went quiet");
+            let (c, d) = m.split_once(' ').unwrap();
+            (c.to_string(), serde_json::from_str::<Value>(d).unwrap())
+        };
+        assert_eq!(next().0, "tableStart");
+        send(h, "getGameInfo1", json!({"tableID": 1}));
+        let (_, init) = next();
+        assert_eq!(init["seed"], seed);
+        send(h, "getGameInfo2", json!({"tableID": 1}));
+        let (_, list) = next();
+        let mut seen = 0;
+        for a in list["list"].as_array().unwrap().iter().filter(|a| a["type"] == "draw" && a["suitIndex"] != -1) {
+            let card = &g["deck"][a["order"].as_u64().unwrap() as usize];
+            assert_eq!((a["suitIndex"].as_u64().unwrap(), a["rank"].as_u64().unwrap()), (card[0].as_u64().unwrap(), card[1].as_u64().unwrap()));
+            seen += 1;
+        }
+        assert_eq!(seen, 10); // the two other hands of five
+        send(h, "tableUnattend", json!({"tableID": 1}));
+        let _ = tables().lock().unwrap().remove(&h);
+    }
+
+    /// You made the table, so you sit where the site seated the creator of a real game on this seed.
+    #[test]
+    fn the_human_sits_where_the_site_seated_the_creator() {
+        // Game #2046249 on hanab.live, seed p3v0s258: its creator was in seat 0.
+        let config = r#"{"variant":"No Variant","players":3,"convention":"HGroup1","seed":"258","paceMs":0}"#;
+        let h = start(VARIANTS, SUITS, config).unwrap();
+        let out = tables().lock().unwrap().get(&h).map(|t| Arc::clone(&t.out)).unwrap();
+        let mut take = || out.pop(Duration::from_secs(10)).expect("the table went quiet");
+        assert!(take().starts_with("tableStart"));
+        send(h, "getGameInfo1", json!({"tableID": 1}));
+        let init = take();
+        assert!(init.contains("\"ourPlayerIndex\":0"), "{init}");
+        assert!(init.contains("\"seed\":\"p3v0s258\""), "{init}");
+        send(h, "tableUnattend", json!({"tableID": 1}));
+        let _ = tables().lock().unwrap().remove(&h);
+    }
+
+    /// A whole seed as the site shows it works as well as its suffix, and must be for this table.
+    #[test]
+    fn a_whole_seed_is_accepted_when_it_fits_the_table() {
+        let whole = r#"{"variant":"No Variant","players":3,"convention":"HGroup1","seed":"p3v0s258","paceMs":0}"#;
+        let h = start(VARIANTS, SUITS, whole).unwrap();
+        let out = tables().lock().unwrap().get(&h).map(|t| Arc::clone(&t.out)).unwrap();
+        let mut take = || out.pop(Duration::from_secs(10)).expect("the table went quiet");
+        assert!(take().starts_with("tableStart"));
+        send(h, "getGameInfo1", json!({"tableID": 1}));
+        let init = take();
+        // Not "p3v0sp3v0s258": the same seed, so the same deal, as typing just 258.
+        assert!(init.contains("\"seed\":\"p3v0s258\""), "{init}");
+        send(h, "tableUnattend", json!({"tableID": 1}));
+        let _ = tables().lock().unwrap().remove(&h);
+
+        let wrong_size = r#"{"variant":"No Variant","players":4,"convention":"HGroup1","seed":"p3v0s258","paceMs":0}"#;
+        assert!(start(VARIANTS, SUITS, wrong_size).is_err());
+        let wrong_variant = r#"{"variant":"6 Suits","players":3,"convention":"HGroup1","seed":"p3v0s258","paceMs":0}"#;
+        assert!(start(VARIANTS, SUITS, wrong_variant).is_err());
     }
 
     /// Every variant the app offers offline, with 2 to 4 players. Slow; run with `--ignored`.
