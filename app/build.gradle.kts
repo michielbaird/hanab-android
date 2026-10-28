@@ -15,8 +15,8 @@ android {
         applicationId = "live.hanab.client"
         minSdk = 26
         targetSdk = 35
-        versionCode = 4
-        versionName = "0.4"
+        versionCode = 5
+        versionName = "0.5"
     }
     // Release signing comes from keystore.properties (gitignored; see keystore.properties.example).
     // Without it the release build is unsigned and cannot be installed.
