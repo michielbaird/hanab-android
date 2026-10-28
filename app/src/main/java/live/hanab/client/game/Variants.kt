@@ -136,6 +136,18 @@ object Variants {
 
     fun isSupported(variant: String) = variant in supportedNames
 
+    /**
+     * Names hanab-bot-rs says it cannot play (it warns "may crash or behave nonsensically"): a variant whose name
+     * contains one of these is left out of offline play. Copied from the bot's `UNSUPPORTED_VARIANTS`.
+     */
+    private val botUnsupported = listOf(
+        "Blind", "Mute", "Ambiguous", "Dual-Color", "Synesthesia", "Mix", "Funnels", "Chimneys", "Matryoshka",
+        "Alternating", "Odds", "Cow", "Duck", "Reversed", "Throw", "Up or Down", "Sudoku",
+    )
+
+    /** What we can both show and the bots can play: the variants offered for offline games. */
+    fun botSupported(): List<String> = supportedNames.filter { n -> botUnsupported.none { n.contains(it) } }
+
     /** Everything we can play, for the table-creation search. */
     fun allSupported(): List<String> = supportedNames
 

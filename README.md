@@ -75,7 +75,7 @@ Notes:
 "Play offline against bots" (on the login screen, and as "Offline" in the lobby) plays you against 1 to 3 bots on the
 phone itself, with no account or connection. The bots are [hanab-bot-rs](https://github.com/michielbaird/hanab-bot-rs),
 and a small one-table server in `native/offline` (Rust) deals the game and answers the app with the same messages
-hanab.live sends, so the game screen is the same. It is built for 64-bit ARM phones only; elsewhere the buttons are hidden.
+hanab.live sends, so the game screen is the same. It is built for 64-bit ARM phones (every build) and for x86_64 emulators (debug builds only); on other devices the buttons are hidden.
 
 The library is not part of the normal Gradle build. Build it once (and after changing `native/offline`):
 
@@ -89,7 +89,7 @@ ativeuild.ps1      # Windows
 ```
 
 It needs [rustup](https://rustup.rs) (the pinned Rust toolchain is fetched for you) and the Android NDK (Android Studio >
-SDK Manager > SDK Tools > NDK, r27 or newer). The result is copied to `app/src/main/jniLibs/` (not committed). The release
+SDK Manager > SDK Tools > NDK, r27 or newer). The results are copied to `app/src/main/jniLibs/` (phones) and `app/src/debug/jniLibs/` (emulators); neither is committed. The release
 scripts run it when `cargo` is installed.
 
 ## Release build

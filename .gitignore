@@ -38,3 +38,4 @@ Thumbs.db
 dist/
 native/*/target/
 app/src/main/jniLibs/
+app/src/debug/jniLibs/

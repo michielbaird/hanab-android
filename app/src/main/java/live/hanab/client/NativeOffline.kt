@@ -2,7 +2,7 @@ package live.hanab.client
 
 /**
  * The offline table: a small hanab.live "server" with bots (hanab-bot-rs), written in Rust and built from
- * native/offline. It is only packaged for 64-bit ARM phones; [available] is false anywhere else.
+ * native/offline. It is packaged for 64-bit ARM phones, and for x86_64 emulators in debug builds; [available] is false anywhere else.
  */
 object NativeOffline {
     val available: Boolean = try {

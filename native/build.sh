@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
-# Builds the offline-play library (native/offline, Rust) for 64-bit ARM phones and copies it where Gradle
-# packages it. Needs rustup (it fetches the pinned toolchain itself) and the Android NDK.
+# Builds the offline-play library (native/offline, Rust) and copies it where Gradle packages it:
+#   arm64-v8a (phones)  -> app/src/main/jniLibs, in every build
+#   x86_64 (emulators)  -> app/src/debug/jniLibs, in debug builds only
+# Needs rustup (it fetches the pinned toolchain itself) and the Android NDK.
 set -euo pipefail
 here="$(cd "$(dirname "$0")" && pwd)"
 
@@ -19,13 +21,18 @@ case "$(uname -s)" in
   *) host=linux-x86_64 ;;
 esac
 bin="$ndk/toolchains/llvm/prebuilt/$host/bin"
+export AR_aarch64_linux_android="$bin/llvm-ar"
+export AR_x86_64_linux_android="$bin/llvm-ar"
 export CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER="$bin/aarch64-linux-android26-clang"
 export CC_aarch64_linux_android="$bin/aarch64-linux-android26-clang"
-export AR_aarch64_linux_android="$bin/llvm-ar"
+export CARGO_TARGET_X86_64_LINUX_ANDROID_LINKER="$bin/x86_64-linux-android26-clang"
+export CC_x86_64_linux_android="$bin/x86_64-linux-android26-clang"
 
-(cd "$here/offline" && cargo build --release --target aarch64-linux-android)
-
-dest="$here/../app/src/main/jniLibs/arm64-v8a"
-mkdir -p "$dest"
-cp "$here/offline/target/aarch64-linux-android/release/libhanab_offline.so" "$dest/"
-echo "Copied libhanab_offline.so to $dest"
+build() { # triple destination
+  (cd "$here/offline" && cargo build --release --target "$1")
+  mkdir -p "$here/../app/src/$2"
+  cp "$here/offline/target/$1/release/libhanab_offline.so" "$here/../app/src/$2/"
+  echo "Copied libhanab_offline.so ($1) to app/src/$2"
+}
+build aarch64-linux-android main/jniLibs/arm64-v8a
+build x86_64-linux-android debug/jniLibs/x86_64

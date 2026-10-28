@@ -1,10 +1,17 @@
+@file:OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+
 package live.hanab.client.ui
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.ui.Modifier
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -16,6 +23,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.unit.dp
 import live.hanab.client.BotStore
+import live.hanab.client.game.Variants
 
 /** Choose who to play against offline: the table size, the bots' conventions and the variant. */
 @Composable
@@ -28,7 +36,7 @@ fun OfflineDialog(onStart: (players: Int, convention: String, variant: String, f
         onDismissRequest = onDismiss,
         title = { Text("Play offline") },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(
                     "You and bots, all on this phone. No account or connection needed.",
                     style = MaterialTheme.typography.bodySmall,
@@ -45,11 +53,22 @@ fun OfflineDialog(onStart: (players: Int, convention: String, variant: String, f
                     androidx.compose.material3.Checkbox(checked = fast, onCheckedChange = { fast = it })
                     Text("Fast mode (no thinking delay)")
                 }
-                Text("Variant", style = MaterialTheme.typography.labelLarge)
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    listOf("No Variant", "6 Suits").forEach { v ->
+                Text(if (variant in Variants.quick) "Variant" else "Variant: $variant", style = MaterialTheme.typography.labelLarge)
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Variants.quick.forEach { v ->
                         FilterChip(selected = variant == v, onClick = { variant = v }, label = { Text(v) })
                     }
+                }
+                var query by remember { mutableStateOf("") }
+                OutlinedTextField(value = query, onValueChange = { query = it }, label = { Text("Search other variants") }, singleLine = true)
+                if (query.length >= 2) {
+                    val matches = remember(query) { Variants.botSupported().filter { it.contains(query, ignoreCase = true) }.take(8) }
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        matches.forEach { v ->
+                            FilterChip(selected = variant == v, onClick = { variant = v; query = "" }, label = { Text(v) })
+                        }
+                    }
+                    if (matches.isEmpty()) Text("No variant matches that the bots can play.", style = MaterialTheme.typography.bodySmall)
                 }
             }
         },

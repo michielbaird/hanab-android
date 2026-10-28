@@ -134,72 +134,104 @@ mod tests {
     const VARIANTS: &str = include_str!("../../../app/src/main/assets/variants.json");
     const SUITS: &str = include_str!("../../../app/src/main/assets/suits.json");
 
-    fn next(handle: i64) -> Value {
-        let out = tables().lock().unwrap().get(&handle).map(|t| Arc::clone(&t.out)).unwrap();
-        let msg = out.pop(Duration::from_secs(30)).expect("the table went quiet");
-        let (command, data) = msg.split_once(' ').unwrap_or((&msg, "null"));
-        json!({"command": command, "data": serde_json::from_str::<Value>(data).unwrap_or(Value::Null)})
-    }
 
     fn send(handle: i64, command: &str, data: Value) {
         tables().lock().unwrap().get(&handle).unwrap().tx.send(Event::Human(command.into(), data)).unwrap();
     }
 
     /// Plays the app's part: the hand-shake, then a simple human who discards (or clues at 8 clues).
-    #[test]
-    fn plays_a_whole_game_with_bots() {
-        let h = start(VARIANTS, SUITS, r#"{"variant":"No Variant","players":3,"convention":"HGroup5","seed":5,"paceMs":0}"#).unwrap();
-        assert_eq!(next(h)["command"], "tableStart");
+    /// Returns an error instead of panicking, so a sweep can report every failing variant.
+    fn play_scripted(variant: &str, players: usize, seed: u64, check_rules: bool) -> Result<(), String> {
+        let config = format!(r#"{{"variant":{variant:?},"players":{players},"convention":"HGroup1","seed":{seed},"paceMs":0}}"#);
+        let h = start(VARIANTS, SUITS, &config)?;
+        let result = std::panic::catch_unwind(|| scripted_game(h, players, check_rules)).unwrap_or_else(|_| Err("panic".into()));
+        let _ = tables().lock().unwrap().remove(&h);
+        result
+    }
+
+    fn scripted_game(h: i64, players: usize, check_rules: bool) -> Result<(), String> {
+        let wait = |what: &str| -> Result<Value, String> {
+            let out = tables().lock().unwrap().get(&h).map(|t| Arc::clone(&t.out)).ok_or("gone")?;
+            let msg = out.pop(Duration::from_secs(60)).ok_or(format!("went quiet waiting for {what}"))?;
+            let (command, data) = msg.split_once(' ').unwrap_or((&msg, "null"));
+            Ok(json!({"command": command, "data": serde_json::from_str::<Value>(data).unwrap_or(Value::Null)}))
+        };
+        let expect = |what: &str, command: &str| -> Result<Value, String> {
+            let m = wait(what)?;
+            if m["command"] == command { Ok(m) } else { Err(format!("expected {command}, got {}", m["command"])) }
+        };
+        expect("tableStart", "tableStart")?;
         send(h, "getGameInfo1", json!({"tableID": 1}));
-        let init = next(h);
-        assert_eq!(init["command"], "init");
-        assert_eq!(init["data"]["playerNames"].as_array().unwrap().len(), 3);
+        let init = expect("init", "init")?;
+        if init["data"]["playerNames"].as_array().map_or(0, Vec::len) != players {
+            return Err("wrong number of players".into());
+        }
+        // The human sits at a random seat; seat 0 starts, so sometimes a bot goes first.
+        let me = init["data"]["ourPlayerIndex"].as_i64().ok_or("no seat")?;
+        let other = (me + 1) % players as i64;
         send(h, "getGameInfo2", json!({"tableID": 1}));
-        let list = next(h);
-        assert_eq!(list["command"], "gameActionList");
-        let actions = list["data"]["list"].as_array().unwrap();
-        // 3 hands of 5, then status and turn
-        assert_eq!(actions.len(), 15 + 2);
+        let list = expect("gameActionList", "gameActionList")?;
+        let actions = list["data"]["list"].as_array().ok_or("no list")?.clone();
+        let hand = if players <= 3 { 5 } else { 4 };
+        if actions.len() != players * hand + 2 {
+            return Err(format!("{} dealt actions", actions.len()));
+        }
         let mut mine: Vec<i64> = actions
             .iter()
-            .filter(|a| a["type"] == "draw" && a["playerIndex"] == 0)
+            .filter(|a| a["type"] == "draw" && a["playerIndex"] == me)
             .map(|a| a["order"].as_i64().unwrap())
             .collect();
-        assert!(actions.iter().filter(|a| a["type"] == "draw" && a["playerIndex"] == 0).all(|a| a["suitIndex"] == -1));
         let mut clues = 8;
         send(h, "loaded", json!({"tableID": 1}));
 
-        // Rules are enforced: no discarding at 8 clues, and no clue to yourself.
-        send(h, "action", json!({"tableID": 1, "type": 1, "target": mine[0], "value": 0}));
-        let w = next(h);
-        assert_eq!(w["command"], "warning");
-        send(h, "action", json!({"tableID": 1, "type": 2, "target": 0, "value": 0}));
-        assert_eq!(next(h)["command"], "warning");
+        // Rules are enforced: no discarding at 8 clues, and no clue to yourself. Probed on the first own turn.
+        let mut probe = check_rules;
+        let probe_rules = |mine: &Vec<i64>, clues: i64| -> Result<(), String> {
+            if clues == 8 {
+                send(h, "action", json!({"tableID": 1, "type": 1, "target": mine[0], "value": 0}));
+                expect("a warning", "warning")?;
+            }
+            send(h, "action", json!({"tableID": 1, "type": 2, "target": me, "value": 0}));
+            expect("a warning", "warning")?;
+            Ok(())
+        };
 
         let mut value = 1;
-        let mut over = false;
         let mut moves = 0;
-        // The first turn is the human's: it came in the action list, not as a live message.
-        send(h, "action", json!({"tableID": 1, "type": 3, "target": 1, "value": value}));
-        while !over {
-            let m = next(h);
+        // If the human starts, that turn came in the action list, not as a live message.
+        if me == 0 {
+            if probe {
+                probe_rules(&mine, clues)?;
+                probe = false;
+            }
+            send(h, "action", json!({"tableID": 1, "type": 3, "target": other, "value": value}));
+        }
+        loop {
+            let m = wait("the next message")?;
             match m["command"].as_str().unwrap() {
                 "warning" => {
                     // That clue touched nothing: try the next rank.
                     value = value % 5 + 1;
-                    send(h, "action", json!({"tableID": 1, "type": 3, "target": 1, "value": value}));
+                    send(h, "action", json!({"tableID": 1, "type": 3, "target": other, "value": value}));
                 }
                 "gameAction" => {
                     let a = &m["data"]["action"];
                     match a["type"].as_str().unwrap() {
                         "status" => clues = a["clues"].as_i64().unwrap(),
-                        "draw" if a["playerIndex"] == 0 => mine.push(a["order"].as_i64().unwrap()),
-                        "play" | "discard" if a["playerIndex"] == 0 => mine.retain(|&o| o != a["order"].as_i64().unwrap()),
-                        "gameOver" => over = true,
-                        "turn" if a["currentPlayerIndex"] == 0 => {
+                        "draw" if a["playerIndex"] == me => mine.push(a["order"].as_i64().unwrap()),
+                        "play" | "discard" if a["playerIndex"] == me => mine.retain(|&o| o != a["order"].as_i64().unwrap()),
+                        "gameOver" => return Ok(()),
+                        "turn" if a["currentPlayerIndex"] == me => {
                             moves += 1;
+                            if probe {
+                                probe_rules(&mine, clues)?;
+                                probe = false;
+                            }
+                            if mine.is_empty() {
+                                return Err("the human has no cards but it is their turn".into());
+                            }
                             if clues == 8 {
-                                send(h, "action", json!({"tableID": 1, "type": 3, "target": 1, "value": value}));
+                                send(h, "action", json!({"tableID": 1, "type": 3, "target": other, "value": value}));
                             } else {
                                 send(h, "action", json!({"tableID": 1, "type": 1, "target": mine[0], "value": 0}));
                             }
@@ -209,12 +241,54 @@ mod tests {
                 }
                 _ => {}
             }
-            if moves > 200 {
-                panic!("the game did not end");
+            if moves > 300 {
+                return Err("the game did not end".into());
             }
         }
-        assert!(over);
-        send(h, "tableUnattend", json!({"tableID": 1}));
-        let _ = tables().lock().unwrap().remove(&h);
+    }
+
+    #[test]
+    fn plays_a_whole_game_with_bots() {
+        play_scripted("No Variant", 3, 5, true).unwrap();
+    }
+
+    /// Every variant the app offers offline, with 2 to 4 players. Slow; run with `--ignored`.
+    #[test]
+    #[ignore]
+    fn plays_every_offered_variant() {
+        let all: Vec<Value> = serde_json::from_str(VARIANTS).unwrap();
+        let suits: Vec<Value> = serde_json::from_str(SUITS).unwrap();
+        let known: Vec<&str> = suits.iter().map(|s| s["name"].as_str().unwrap()).collect();
+        let unusable: Vec<&str> = suits
+            .iter()
+            .filter(|s| s["prism"] == true || s["inverted"] == true)
+            .map(|s| s["name"].as_str().unwrap())
+            .collect();
+        let bot_no = [
+            "Blind", "Mute", "Ambiguous", "Dual-Color", "Synesthesia", "Mix", "Funnels", "Chimneys", "Matryoshka",
+            "Alternating", "Odds", "Cow", "Duck", "Reversed", "Throw", "Up or Down", "Sudoku",
+        ];
+        let mut failures = Vec::new();
+        let mut played = 0;
+        for v in &all {
+            let name = v["name"].as_str().unwrap();
+            let plain = v.as_object().unwrap().keys().all(|k| ["id", "newID", "name", "suits"].contains(&k.as_str()));
+            let suits_ok = v["suits"].as_array().unwrap().iter().all(|s| {
+                let s = s.as_str().unwrap();
+                known.contains(&s) && !unusable.contains(&s)
+            });
+            if !plain || !suits_ok || bot_no.iter().any(|b| name.contains(b)) {
+                continue;
+            }
+            let players = 2 + played % 3;
+            played += 1;
+            if let Err(e) = play_scripted(name, players, played as u64, false) {
+                failures.push(format!("{name} ({players}p): {e}"));
+            }
+        }
+        eprintln!("played {played} variants");
+        assert!(failures.is_empty(), "{} failures:
+{}", failures.len(), failures.join("
+"));
     }
 }

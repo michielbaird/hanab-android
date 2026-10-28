@@ -21,7 +21,6 @@ use hanab_bot::tools::self_play::{full_deck, Rng};
 use serde_json::{json, Value};
 
 const TABLE_ID: usize = 1;
-const HUMAN: usize = 0;
 
 /// What the app asked for.
 pub struct Config {
@@ -84,6 +83,8 @@ fn status(game: &Game) -> Value {
 
 struct Table<'a> {
     cfg: &'a Config,
+    /// Where the human sits; chosen at random for each game, so sometimes a bot starts.
+    human: usize,
     seed: u64,
     out: &'a Outbox,
     rx: &'a Receiver<Event>,
@@ -136,9 +137,9 @@ impl<'a> Table<'a> {
         out: &'a Outbox,
     ) -> Self {
         let num = cfg.players;
-        let names: Vec<String> = std::iter::once(cfg.human_name.clone())
-            .chain(bot_names(seed, num - 1, &cfg.human_name))
-            .collect();
+        let human = Rng::new(seed ^ 0x5EA7).below(num);
+        let mut names = bot_names(seed, num - 1, &cfg.human_name);
+        names.insert(human, cfg.human_name.clone());
         let mut deck = full_deck(variant);
         Rng::new(seed).shuffle(&mut deck);
 
@@ -158,7 +159,7 @@ impl<'a> Table<'a> {
                 game
             })
             .collect();
-        Table { cfg, seed, out, rx, variant: Arc::clone(variant), deck, games, names }
+        Table { cfg, seed, human, out, rx, variant: Arc::clone(variant), deck, games, names }
     }
 
     /// After a finished game: true if the app wants to play again.
@@ -199,11 +200,11 @@ impl<'a> Table<'a> {
         for p in 0..n {
             for k in 0..HAND_SIZE[n] {
                 let order = p * HAND_SIZE[n] + k;
-                let (suit, rank) = identity_json((p != HUMAN).then(|| self.deck[order]));
+                let (suit, rank) = identity_json((p != self.human).then(|| self.deck[order]));
                 list.push(json!({"type": "draw", "playerIndex": p, "order": order, "suitIndex": suit, "rank": rank}));
             }
         }
-        list.push(status(&self.games[HUMAN]));
+        list.push(status(&self.games[self.human]));
         list.push(json!({"type": "turn", "num": 0, "currentPlayerIndex": 0}));
         list
     }
@@ -222,7 +223,7 @@ impl<'a> Table<'a> {
         self.out.push(
             "init",
             json!({
-                "tableID": TABLE_ID, "playerNames": self.names, "ourPlayerIndex": HUMAN, "spectating": false,
+                "tableID": TABLE_ID, "playerNames": self.names, "ourPlayerIndex": self.human, "spectating": false,
                 "replay": false, "sharedReplay": false, "seed": format!("offline-{}", self.seed),
                 "options": opts, "characterAssignments": [], "characterMetadata": [],
             }),
@@ -240,7 +241,7 @@ impl<'a> Table<'a> {
                 return End::Over;
             }
             let current = self.games[0].state.current_player_index;
-            let perform = if current == HUMAN {
+            let perform = if current == self.human {
                 match self.human_move() {
                     Some(p) => p,
                     None => return End::Closed,
@@ -283,7 +284,7 @@ impl<'a> Table<'a> {
         loop {
             let (command, data) = self.next_event()?;
             if command == "tableTerminate" {
-                return Some(PerformAction::Terminate { target: HUMAN, value: 0 });
+                return Some(PerformAction::Terminate { target: self.human, value: 0 });
             }
             if command != "action" {
                 continue;
@@ -297,11 +298,11 @@ impl<'a> Table<'a> {
     }
 
     fn check(&self, kind: i64, target: i64, value: i64) -> Result<PerformAction, String> {
-        let s = &self.games[HUMAN].state;
+        let s = &self.games[self.human].state;
         let (target, value) = (target.max(-1), value.max(-1));
         match kind {
             0 | 1 => {
-                if target < 0 || !s.hands[HUMAN].contains(&(target as usize)) {
+                if target < 0 || !s.hands[self.human].contains(&(target as usize)) {
                     return Err("That card is not in your hand.".into());
                 }
                 if kind == 1 && s.clue_tokens >= 8 {
@@ -314,7 +315,7 @@ impl<'a> Table<'a> {
                 if s.clue_tokens == 0 {
                     return Err("There are no clues left.".into());
                 }
-                if target < 0 || target as usize >= s.num_players || target as usize == HUMAN {
+                if target < 0 || target as usize >= s.num_players || target as usize == self.human {
                     return Err("Choose another player to clue.".into());
                 }
                 let (t, v) = (target as usize, value as usize);
@@ -329,12 +330,12 @@ impl<'a> Table<'a> {
                     }
                     PerformAction::Rank { target: t, value: v }
                 };
-                match perform.to_action(s, HUMAN, Some(&self.deck), false) {
+                match perform.to_action(s, self.human, Some(&self.deck), false) {
                     Action::Clue(c) if c.list.is_empty() => Err("That clue would touch no cards.".into()),
                     _ => Ok(perform),
                 }
             }
-            4 => Ok(PerformAction::Terminate { target: HUMAN, value: 0 }),
+            4 => Ok(PerformAction::Terminate { target: self.human, value: 0 }),
             _ => Err("The game does not know that move.".into()),
         }
     }
@@ -396,11 +397,11 @@ impl<'a> Table<'a> {
         if matches!(perform, PerformAction::Play { .. } | PerformAction::Discard { .. }) && !self.games[0].state.ended() {
             let order = self.games[0].state.next_card_order - 1;
             if order < self.deck.len() && order >= n * HAND_SIZE[n] {
-                let (suit, rank) = identity_json((current != HUMAN).then(|| self.deck[order]));
+                let (suit, rank) = identity_json((current != self.human).then(|| self.deck[order]));
                 events.push(json!({"type": "draw", "playerIndex": current, "order": order, "suitIndex": suit, "rank": rank}));
             }
         }
-        events.push(status(&self.games[HUMAN]));
+        events.push(status(&self.games[self.human]));
 
         for e in events {
             self.out.push("gameAction", json!({"tableID": TABLE_ID, "action": e}));
@@ -425,7 +426,7 @@ impl<'a> Table<'a> {
 
     /// Ends the game now (the player gave up, or a bot failed): condition 4 is "terminated".
     fn finish(&self, player: usize, condition: i64) {
-        self.out.push("gameAction", json!({"tableID": TABLE_ID, "action": status(&self.games[HUMAN])}));
+        self.out.push("gameAction", json!({"tableID": TABLE_ID, "action": status(&self.games[self.human])}));
         self.game_over(player, condition);
     }
 }
