@@ -19,10 +19,16 @@ object NativeOffline {
     external fun startReplay(recordJson: String): String
 
     /**
-     * Has the bot go through a finished game (the website's export or an offline record) and comment on the moves it
-     * would have played differently. Slow: call it off the main thread. Returns `{"players", "comments"}` or `{"error"}`.
+     * Starts the bot going through a finished game (the website's export or an offline record), on threads of its
+     * own, and returns a handle (0 if it could not start). Ask how it is doing with [analyzePoll].
      */
-    external fun analyze(variantsJson: String, suitsJson: String, gameJson: String, variant: String, convention: String): String
+    external fun analyzeStart(variantsJson: String, suitsJson: String, gameJson: String, variant: String, convention: String): Long
+
+    /** `progress <moves done> <moves in all>` while it runs, then `result <json>` (`{"players", "comments"}` or `{"error"}`). */
+    external fun analyzePoll(handle: Long): String
+
+    /** Stops an analysis between moves. */
+    external fun analyzeCancel(handle: Long)
 
     /** Passes one command of the app (`getGameInfo1`, `action`, ...) to the table. */
     external fun send(handle: Long, command: String, dataJson: String)

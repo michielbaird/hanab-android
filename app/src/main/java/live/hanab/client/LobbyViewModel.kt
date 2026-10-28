@@ -233,18 +233,32 @@ class LobbyViewModel(app: Application) : AndroidViewModel(app) {
         val app = getApplication<Application>()
         analysisJob?.cancel()
         analysisJob = viewModelScope.launch {
+            var handle = 0L
             try {
                 val game = if (request.online) live.hanab.client.net.ProfileApi.export(request.id)
                 else withContext(kotlinx.coroutines.Dispatchers.IO) { OfflineStore.record(app, request.id) }
                     ?: return@launch fail("That saved game could not be found.")
-                val comments = withContext(kotlinx.coroutines.Dispatchers.Default) {
+                handle = withContext(kotlinx.coroutines.Dispatchers.Default) {
                     val variants = app.assets.open("variants.json").bufferedReader().use { it.readText() }
                     val suits = app.assets.open("suits.json").bufferedReader().use { it.readText() }
-                    parseAnalysis(NativeOffline.analyze(variants, suits, game, request.variant, convention))
+                    NativeOffline.analyzeStart(variants, suits, game, request.variant, convention)
                 }
-                withContext(kotlinx.coroutines.Dispatchers.IO) { AnalysisStore.save(app, request, convention, comments) }
-                _ui.update { it.copy(analysis = AnalysisUi.Done(request, convention, comments)) }
+                if (handle == 0L) return@launch fail("The analysis could not start.")
+                while (true) {
+                    val reply = NativeOffline.analyzePoll(handle)
+                    if (reply.startsWith("result ")) {
+                        val comments = parseAnalysis(reply.removePrefix("result "))
+                        withContext(kotlinx.coroutines.Dispatchers.IO) { AnalysisStore.save(app, request, convention, comments) }
+                        _ui.update { it.copy(analysis = AnalysisUi.Done(request, convention, comments)) }
+                        return@launch
+                    }
+                    val (done, total) = reply.removePrefix("progress ").split(' ').map { it.toIntOrNull() ?: 0 }
+                    _ui.update { s -> (s.analysis as? AnalysisUi.Running)?.let { s.copy(analysis = it.copy(done = done, total = total)) } ?: s }
+                    kotlinx.coroutines.delay(250)
+                }
             } catch (e: kotlinx.coroutines.CancellationException) {
+                // Closing the analysis stops the bot between moves.
+                if (handle != 0L) NativeOffline.analyzeCancel(handle)
                 throw e
             } catch (e: Exception) {
                 fail(if (request.online) "Could not analyze the game: ${e.message}" else (e.message ?: "The analysis failed."))

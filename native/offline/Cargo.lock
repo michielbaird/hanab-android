@@ -33,7 +33,7 @@ dependencies = [
 [[package]]
 name = "hanab-bot-rs"
 version = "0.1.0"
-source = "git+https://github.com/michielbaird/hanab-bot-rs#593d76f8d6acea061c39c5b4fb10710c620ec5c7"
+source = "git+https://github.com/michielbaird/hanab-bot-rs#579caf90ab5b335322cea7afe19fbbac16a3e555"
 dependencies = [
  "serde",
  "serde_json",

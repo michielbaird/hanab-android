@@ -26,7 +26,14 @@ sealed interface AnalysisUi {
     val request: AnalysisRequest
 
     data class Setup(override val request: AnalysisRequest) : AnalysisUi
-    data class Running(override val request: AnalysisRequest, val convention: String, val startedAt: Long) : AnalysisUi
+    data class Running(
+        override val request: AnalysisRequest,
+        val convention: String,
+        val startedAt: Long,
+        /** Moves the bot has looked at, of all the moves in the game (0 of 0 until it has started). */
+        val done: Int = 0,
+        val total: Int = 0,
+    ) : AnalysisUi
     data class Done(override val request: AnalysisRequest, val convention: String, val comments: List<AnalysisComment>) : AnalysisUi
     data class Failed(override val request: AnalysisRequest, val message: String) : AnalysisUi
 }

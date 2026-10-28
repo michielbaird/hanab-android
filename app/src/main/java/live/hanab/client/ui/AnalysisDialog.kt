@@ -3,6 +3,7 @@ package live.hanab.client.ui
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
@@ -92,11 +93,19 @@ private fun RunningDialog(state: AnalysisUi.Running, vm: LobbyViewModel) {
         onDismissRequest = vm::closeAnalysis,
         title = { Text("Analyzing...") },
         text = {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                CircularProgressIndicator()
-                Column {
-                    Text("${state.request.title} with ${state.convention}", style = MaterialTheme.typography.bodyMedium)
-                    Text("${seconds}s so far", style = MaterialTheme.typography.bodySmall)
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text("${state.request.title} with ${state.convention}", style = MaterialTheme.typography.bodyMedium)
+                if (state.total > 0) {
+                    androidx.compose.material3.LinearProgressIndicator(
+                        progress = { state.done.toFloat() / state.total },
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Text("${state.done} of ${state.total} moves · ${seconds}s", style = MaterialTheme.typography.bodySmall)
+                } else {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        CircularProgressIndicator()
+                        Text("Starting... ${seconds}s", style = MaterialTheme.typography.bodySmall)
+                    }
                 }
             }
         },
