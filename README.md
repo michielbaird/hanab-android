@@ -80,8 +80,7 @@ hanab.live sends, so the game screen is the same. It is built for 64-bit ARM pho
 The library is not part of the normal Gradle build. Build it once (and after changing `native/offline`):
 
 ```powershell
-.
-ativeuild.ps1      # Windows
+.\native\build.ps1      # Windows
 ```
 
 ```bash
