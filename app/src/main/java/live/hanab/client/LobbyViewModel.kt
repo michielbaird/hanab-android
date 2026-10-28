@@ -79,6 +79,8 @@ data class LobbyUiState(
     val offline: Boolean = false,
     /** Player whose profile (history and stats) is on screen. */
     val profile: String? = null,
+    /** The stats and games from offline play are on screen. */
+    val offlineStats: Boolean = false,
 )
 
 class LobbyViewModel(app: Application) : AndroidViewModel(app) {
@@ -143,7 +145,6 @@ class LobbyViewModel(app: Application) : AndroidViewModel(app) {
      * restored when you leave it.
      */
     fun startOffline(players: Int, convention: String, variant: String, fast: Boolean) {
-        val wasOnline = _ui.value.loggedIn && !_ui.value.offline
         val app = getApplication<Application>()
         val variants = app.assets.open("variants.json").bufferedReader().use { it.readText() }
         val suits = app.assets.open("suits.json").bufferedReader().use { it.readText() }
@@ -156,11 +157,35 @@ class LobbyViewModel(app: Application) : AndroidViewModel(app) {
             put("paceMs", if (fast) 900 else 2500)
         }
         BotStore.remember(convention, fast)
-        val error = client.startOffline(viewModelScope, variants, suits, config.toString())
+        enterOffline(client.startOffline(viewModelScope, variants, suits, config.toString()))
+    }
+
+    /** Watch a finished offline game again; leaving it returns to the offline stats. */
+    fun openOfflineReplay(id: Long) {
+        val record = OfflineStore.record(getApplication(), id)
+        if (record == null) {
+            _ui.update { it.copy(error = "That saved game could not be found.") }
+            return
+        }
+        statsAfterOffline = true
+        enterOffline(client.startOfflineReplay(viewModelScope, record))
+    }
+
+    fun openOfflineStats() = _ui.update { it.copy(offlineStats = true) }
+
+    fun closeOfflineStats() = _ui.update { it.copy(offlineStats = false) }
+
+    /** Whether to show the offline stats when the offline game or replay that is on screen is left. */
+    private var statsAfterOffline = false
+
+    /** Switches to the offline table that [error] == null says has just been started (else shows the error). */
+    private fun enterOffline(error: String?) {
         if (error != null) {
+            statsAfterOffline = false
             _ui.update { it.copy(error = error) }
             return
         }
+        val wasOnline = _ui.value.loggedIn && !_ui.value.offline
         // The offline screen first, so closing the socket below is not mistaken for a dropped connection.
         _ui.value = LobbyUiState(me = Welcome(username = "You"), loggedIn = true, offline = true, connection = ConnState.Connected)
         if (wasOnline) {
@@ -172,7 +197,8 @@ class LobbyViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun exitOffline() {
         // Clear the screen first, so the table closing is not mistaken for a dropped connection.
-        _ui.value = LobbyUiState()
+        _ui.value = LobbyUiState(offlineStats = statsAfterOffline)
+        statsAfterOffline = false
         client.stopOffline()
         if (resumeOnline) {
             resumeOnline = false
@@ -739,6 +765,11 @@ class LobbyViewModel(app: Application) : AndroidViewModel(app) {
                     (o?.get("suitIndex")?.jsonPrimitive?.intOrNull ?: -1) to (o?.get("rank")?.jsonPrimitive?.intOrNull ?: -1)
                 } ?: emptyList()
                 _ui.update { s -> s.copy(game = s.game?.withIdentities(ids)) }
+            }
+            "offlineRecord" -> (m.data as? JsonObject)?.let { record ->
+                // The offline table sends the game when it ends; keep it for the offline stats.
+                val app = getApplication<Application>()
+                viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) { runCatching { OfflineStore.save(app, record.toString()) } }
             }
             "left" -> _ui.update { it.copy(joinedTableID = null, game = null, tableChat = emptyList(), replay = null, sharedSegment = null) }
             "tableStart" -> (m.data as? JsonObject)?.let { d ->

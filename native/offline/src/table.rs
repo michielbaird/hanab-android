@@ -5,12 +5,13 @@
 //! the game screen does not know it is offline. Rules and bot play come from the bot library, driven the
 //! way its self-play does: every seat keeps its own `Game`, from its own point of view.
 
+use std::cell::RefCell;
 use std::collections::VecDeque;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::Receiver;
 use std::sync::{Arc, Condvar, Mutex};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use hanab_bot::basics::action::{Action, DrawAction, TurnAction};
 use hanab_bot::basics::clue::ClueKind;
@@ -92,6 +93,10 @@ struct Table<'a> {
     deck: Vec<Identity>,
     games: Vec<Game>,
     names: Vec<String>,
+    /// Every action of the game with all cards shown, as a replay needs them (see `offlineRecord`).
+    record: RefCell<Vec<Value>>,
+    started: Instant,
+    started_at_ms: u64,
 }
 
 /// How a game ended, as far as what comes next goes.
@@ -159,7 +164,20 @@ impl<'a> Table<'a> {
                 game
             })
             .collect();
-        Table { cfg, seed, human, out, rx, variant: Arc::clone(variant), deck, games, names }
+        Table {
+            cfg,
+            seed,
+            human,
+            out,
+            rx,
+            variant: Arc::clone(variant),
+            deck,
+            games,
+            names,
+            record: RefCell::new(Vec::new()),
+            started: Instant::now(),
+            started_at_ms: 0,
+        }
     }
 
     /// After a finished game: true if the app wants to play again.
@@ -231,10 +249,14 @@ impl<'a> Table<'a> {
         if self.wait_for("getGameInfo2").is_none() {
             return End::Closed;
         }
-        self.out.push("gameActionList", json!({"tableID": TABLE_ID, "list": self.deal_actions()}));
+        let dealt = self.deal_actions();
+        self.out.push("gameActionList", json!({"tableID": TABLE_ID, "list": dealt}));
+        *self.record.borrow_mut() = dealt.iter().map(|a| self.reveal(a)).collect();
         if self.wait_for("loaded").is_none() {
             return End::Closed;
         }
+        self.started = Instant::now();
+        self.started_at_ms = SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_millis() as u64);
 
         loop {
             if self.games[0].state.ended() {
@@ -404,7 +426,7 @@ impl<'a> Table<'a> {
         events.push(status(&self.games[self.human]));
 
         for e in events {
-            self.out.push("gameAction", json!({"tableID": TABLE_ID, "action": e}));
+            self.emit(e);
         }
         let state = &self.games[0].state;
         if state.ended() {
@@ -412,21 +434,52 @@ impl<'a> Table<'a> {
             self.game_over(current, condition);
         } else {
             let turn = json!({"type": "turn", "num": state.turn_count - 1, "currentPlayerIndex": state.current_player_index});
-            self.out.push("gameAction", json!({"tableID": TABLE_ID, "action": turn}));
+            self.emit(turn);
         }
         Ok(())
     }
 
+    /// Sends one game action to the app, and keeps it for the record.
+    fn emit(&self, action: Value) {
+        self.record.borrow_mut().push(self.reveal(&action));
+        self.out.push("gameAction", json!({"tableID": TABLE_ID, "action": action}));
+    }
+
+    /// An action as a spectator sees it: a draw into the human hand shows the card.
+    fn reveal(&self, action: &Value) -> Value {
+        let mut a = action.clone();
+        if a["type"] == "draw" && a["suitIndex"] == -1 {
+            if let Some(id) = a["order"].as_u64().and_then(|o| self.deck.get(o as usize)) {
+                a["suitIndex"] = json!(id.suit_index);
+                a["rank"] = json!(id.rank);
+            }
+        }
+        a
+    }
+
     fn game_over(&self, player: usize, condition: i64) {
         let over = json!({"type": "gameOver", "endCondition": condition, "playerIndex": player, "votes": []});
-        self.out.push("gameAction", json!({"tableID": TABLE_ID, "action": over}));
+        self.emit(over);
         let turn = json!({"type": "turn", "num": self.games[0].state.turn_count - 1, "currentPlayerIndex": -1});
-        self.out.push("gameAction", json!({"tableID": TABLE_ID, "action": turn}));
+        self.emit(turn);
+        // A game that ran its course (not one given up) is handed to the app to keep.
+        if condition == 1 || condition == 2 {
+            let s = &self.games[0].state;
+            self.out.push(
+                "offlineRecord",
+                json!({
+                    "version": 1, "startedAt": self.started_at_ms, "durationMs": self.started.elapsed().as_millis() as u64,
+                    "variant": self.variant.name, "convention": self.cfg.convention, "seed": self.seed,
+                    "names": self.names, "human": self.human, "score": s.score(), "maxScore": s.max_score(),
+                    "endCondition": condition, "actions": *self.record.borrow(),
+                }),
+            );
+        }
     }
 
     /// Ends the game now (the player gave up, or a bot failed): condition 4 is "terminated".
     fn finish(&self, player: usize, condition: i64) {
-        self.out.push("gameAction", json!({"tableID": TABLE_ID, "action": status(&self.games[self.human])}));
+        self.emit(status(&self.games[self.human]));
         self.game_over(player, condition);
     }
 }
@@ -488,4 +541,47 @@ mod tests {
         assert_ne!(bot_names(1, 3, "You"), bot_names(2, 3, "You"));
         assert_eq!(bot_names(7, 3, "You"), bot_names(7, 3, "You"));
     }
+}
+
+/// Serves a finished game (an `offlineRecord`) as a replay: the same hand-shake as a real replay, then the
+/// whole action list, and nothing more until the app leaves.
+pub fn run_replay(record: Value, rx: Receiver<Event>, out: Arc<Outbox>) {
+    let wait_for = |command: &str| -> Option<()> {
+        loop {
+            match rx.recv() {
+                Ok(Event::Human(c, _)) if c == command => return Some(()),
+                Ok(Event::Human(..)) => continue,
+                Ok(Event::Close) | Err(_) => return None,
+            }
+        }
+    };
+    out.push("tableStart", json!({"tableID": TABLE_ID, "replay": true}));
+    if wait_for("getGameInfo1").is_some() {
+        let opts = json!({
+            "variantName": record["variant"], "timed": false, "speedrun": false, "cardCycle": false,
+            "deckPlays": false, "emptyClues": false, "oneExtraCard": false, "oneLessCard": false,
+            "allOrNothing": false, "detrimentalCharacters": false,
+        });
+        out.push(
+            "init",
+            json!({
+                "tableID": TABLE_ID, "playerNames": record["names"], "ourPlayerIndex": record["human"], "spectating": true,
+                "replay": true, "sharedReplay": false, "seed": format!("offline-{}", record["seed"]),
+                "options": opts, "characterAssignments": [], "characterMetadata": [],
+            }),
+        );
+        if wait_for("getGameInfo2").is_some() {
+            out.push("gameActionList", json!({"tableID": TABLE_ID, "list": record["actions"]}));
+            // Nothing else is sent; wait until the app goes back.
+            while let Ok(Event::Human(..)) = rx.recv() {}
+        }
+    }
+    out.close();
+}
+
+pub fn spawn_replay(record: Value, rx: Receiver<Event>, out: Arc<Outbox>) {
+    std::thread::Builder::new()
+        .name("offline-replay".into())
+        .spawn(move || run_replay(record, rx, out))
+        .expect("could not start the replay thread");
 }

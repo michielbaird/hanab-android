@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -63,11 +64,18 @@ class MainActivity : ComponentActivity() {
                 Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
                     if (AppSettings.backdrop) live.hanab.client.ui.FireworksBackdrop()
                     val game = ui.game
+                    val context = androidx.compose.ui.platform.LocalContext.current.applicationContext
                     when {
+                        // The offline stats need no sign-in, and come back after watching one of the games.
+                        ui.offlineStats && !ui.offline -> live.hanab.client.ui.ProfileScreen(
+                            "Offline games", remember(context) { live.hanab.client.net.OfflineSource(context) },
+                            onBack = vm::closeOfflineStats, onOpenReplay = vm::openOfflineReplay,
+                        )
                         !ui.loggedIn -> LoginScreen(ui, vm)
                         game != null -> GameScreen(ui, game, vm)
                         ui.profile != null && !ui.offline -> live.hanab.client.ui.ProfileScreen(
-                            ui.profile!!, onBack = vm::closeProfile, onOpenReplay = vm::openReplay,
+                            ui.profile!!, live.hanab.client.net.OnlineSource(ui.profile!!),
+                            onBack = vm::closeProfile, onOpenReplay = { vm.openReplay(it.toInt()) },
                         )
                         ui.offline -> androidx.compose.material3.Text(
                             "Dealing...", Modifier.align(androidx.compose.ui.Alignment.Center),

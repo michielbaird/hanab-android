@@ -45,8 +45,8 @@ import live.hanab.client.GridColumn
 import live.hanab.client.ProfileUi
 import live.hanab.client.ProfileView
 import live.hanab.client.ProfileViewModel
-import live.hanab.client.game.Variants
-import live.hanab.client.net.HistoryRow
+import live.hanab.client.net.GameLine
+import live.hanab.client.net.ProfileSource
 import live.hanab.client.net.VariantRow
 import java.util.Locale
 
@@ -54,9 +54,9 @@ private val GOLD = Color(0xFFFFC107)
 
 /** A player's profile like the website's: the facts and a grid of variants, with the game history behind a button. */
 @Composable
-fun ProfileScreen(name: String, onBack: () -> Unit, onOpenReplay: (Int) -> Unit) {
+fun ProfileScreen(name: String, source: ProfileSource, onBack: () -> Unit, onOpenReplay: (Long) -> Unit) {
     val pvm: ProfileViewModel = viewModel()
-    LaunchedEffect(name) { pvm.open(name) }
+    LaunchedEffect(name) { pvm.open(name, source) }
     val ui by pvm.ui.collectAsStateWithLifecycle()
     val inHistory = ui.view == ProfileView.History
     val back = { if (inHistory) pvm.show(ProfileView.Stats) else onBack() }
@@ -227,8 +227,7 @@ private fun Pager(page: Int, pages: Int, onPage: (Int) -> Unit) {
 // ------------------------------------------------------------------------------------------ history
 
 @Composable
-private fun HistoryView(ui: ProfileUi, pvm: ProfileViewModel, onOpenReplay: (Int) -> Unit) {
-    val maxScore = { variantId: Int -> ui.variantNames[variantId]?.let { Variants.suits(it) }?.let { it.size * 5 } }
+private fun HistoryView(ui: ProfileUi, pvm: ProfileViewModel, onOpenReplay: (Long) -> Unit) {
     LazyColumn(Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
         item {
             Filters(ui, pvm::setPlayers, pvm::setVariant)
@@ -239,8 +238,8 @@ private fun HistoryView(ui: ProfileUi, pvm: ProfileViewModel, onOpenReplay: (Int
             )
             Pager(ui.historyPage, ui.historyPages, pvm::setHistoryPage)
         }
-        items(ui.history, key = { it.id }) { row ->
-            GameRow(row, ui.name, ui.variantNames[row.variant], maxScore(row.variant)) { onOpenReplay(row.id) }
+        items(ui.history, key = { it.id }) { line ->
+            GameRow(line) { onOpenReplay(line.id) }
             HorizontalDivider()
         }
         item {
@@ -260,7 +259,7 @@ private fun HistoryView(ui: ProfileUi, pvm: ProfileViewModel, onOpenReplay: (Int
 }
 
 @Composable
-private fun Filters(ui: ProfileUi, onPlayers: (Int?) -> Unit, onVariant: (Int?) -> Unit) {
+private fun Filters(ui: ProfileUi, onPlayers: (Int?) -> Unit, onVariant: (String?) -> Unit) {
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             FilterChip(selected = ui.players == null, onClick = { onPlayers(null) }, label = { Text("Any size") })
@@ -269,7 +268,7 @@ private fun Filters(ui: ProfileUi, onPlayers: (Int?) -> Unit, onVariant: (Int?) 
             }
         }
         var query by remember { mutableStateOf("") }
-        val selected = ui.variantId?.let { ui.variantNames[it] ?: "Variant $it" }
+        val selected = ui.variant
         if (selected != null) {
             FilterChip(selected = true, onClick = { onVariant(null) }, label = { Text("$selected  ×") })
         } else {
@@ -279,11 +278,11 @@ private fun Filters(ui: ProfileUi, onPlayers: (Int?) -> Unit, onVariant: (Int?) 
             )
             if (query.length >= 2) {
                 val matches = remember(query, ui.variantNames) {
-                    ui.variantNames.entries.filter { it.value.contains(query, ignoreCase = true) }.take(8)
+                    ui.variantNames.filter { it.contains(query, ignoreCase = true) }.take(8)
                 }
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    matches.forEach { (id, name) ->
-                        FilterChip(selected = false, onClick = { onVariant(id); query = "" }, label = { Text(name) })
+                    matches.forEach { name ->
+                        FilterChip(selected = false, onClick = { onVariant(name); query = "" }, label = { Text(name) })
                     }
                 }
             }
@@ -292,19 +291,21 @@ private fun Filters(ui: ProfileUi, onPlayers: (Int?) -> Unit, onVariant: (Int?) 
 }
 
 @Composable
-private fun GameRow(row: HistoryRow, me: String, variant: String?, max: Int?, onClick: () -> Unit) {
-    val perfect = max != null && row.score == max
+private fun GameRow(line: GameLine, onClick: () -> Unit) {
+    val max = line.max
+    val perfect = max != null && line.score == max
     Row(Modifier.fillMaxWidth().clickable(onClick = onClick).padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {
-            Text(variant ?: "Variant ${row.variant}", style = MaterialTheme.typography.bodyMedium)
+            Text(line.variant, style = MaterialTheme.typography.bodyMedium)
             Text(
-                "${row.date} · ${row.numPlayers}p · with ${row.others(me).joinToString(", ").ifEmpty { "nobody else" }}",
+                "${line.date} · ${line.players}p · with ${line.others.joinToString(", ").ifEmpty { "nobody else" }}" +
+                    (line.note?.let { " · $it" } ?: ""),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.65f),
             )
         }
         Text(
-            if (max != null) "${row.score}/$max" else "${row.score}",
+            if (max != null) "${line.score}/$max" else "${line.score}",
             fontWeight = if (perfect) FontWeight.Bold else FontWeight.Normal,
             color = if (perfect) GOLD else Color.Unspecified,
         )

@@ -66,7 +66,7 @@ fun LobbyScreen(ui: LobbyUiState, vm: LobbyViewModel) {
                     if (live.hanab.client.NativeOffline.available) {
                         var offline by remember { mutableStateOf(false) }
                         TextButton(onClick = { offline = true }) { Text("Offline") }
-                        if (offline) OfflineDialog(onStart = vm::startOffline, onDismiss = { offline = false })
+                        if (offline) OfflineDialog(onStart = vm::startOffline, onStats = vm::openOfflineStats, onDismiss = { offline = false })
                     }
                     var showSettings by remember { mutableStateOf(false) }
                     TextButton(onClick = { showSettings = true }) { Text("Settings") }
