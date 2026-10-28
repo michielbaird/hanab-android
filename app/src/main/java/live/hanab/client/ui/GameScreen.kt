@@ -135,6 +135,13 @@ fun suitBrush(name: String): androidx.compose.ui.graphics.Brush {
     return if (fills.size > 1) androidx.compose.ui.graphics.Brush.horizontalGradient(fills.map { Color(it) })
     else androidx.compose.ui.graphics.SolidColor(suitColor(name))
 }
+/** [suitBrush] for a card that is trash: each colour toned down, so a Rainbow stays a (dim) gradient, not one flat colour. */
+fun dullBrush(name: String): androidx.compose.ui.graphics.Brush {
+    val fills = live.hanab.client.game.Variants.info(name).fills
+    return if (fills.size > 1) androidx.compose.ui.graphics.Brush.horizontalGradient(fills.map { dull(Color(it)) })
+    else androidx.compose.ui.graphics.SolidColor(dull(suitColor(name)))
+}
+
 @Composable
 fun GameScreen(ui: LobbyUiState, g: GameState, vm: LobbyViewModel) {
     // Stop the phone sleeping (and dropping the connection) mid-game, if the setting is on.
@@ -842,7 +849,7 @@ private fun CardView(g: GameState, c: Card, known: Boolean, note: String? = null
     val knownRank = if (known) c.rank else c.possibleRanks.singleOrNull() ?: -1
     val bgBrush: androidx.compose.ui.graphics.Brush = when {
         knownSuit < 0 -> androidx.compose.ui.graphics.SolidColor(Color(0xFF424242))
-        dead -> androidx.compose.ui.graphics.SolidColor(dull(suitColor(g.suits[knownSuit])))
+        dead -> dullBrush(g.suits[knownSuit])
         else -> suitBrush(g.suits[knownSuit])
     }
     val border = if (c.clued) BorderStroke(3.dp, Color.White) else BorderStroke(1.dp, Color(0xFF9E9E9E))
@@ -1060,7 +1067,7 @@ private fun KnowledgeCardView(g: GameState, c: Card, k: Knowledge, note: String?
     val discardable = g.allDead(k.inferred)
     val bg: androidx.compose.ui.graphics.Brush = when {
         solvedSuit == null -> androidx.compose.ui.graphics.SolidColor(Color(0xFF37474F))
-        discardable -> androidx.compose.ui.graphics.SolidColor(dull(suitColor(g.suits[solvedSuit])))
+        discardable -> dullBrush(g.suits[solvedSuit])
         else -> suitBrush(g.suits[solvedSuit])
     }
     val shape = RoundedCornerShape(8.dp)
