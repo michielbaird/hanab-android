@@ -10,6 +10,13 @@ New-Item -ItemType Directory -Force C:\gtmp | Out-Null
 $env:TEMP = "C:\gtmp"; $env:TMP = "C:\gtmp"
 if (-not $env:ANDROID_HOME) { $env:ANDROID_HOME = "$env:LOCALAPPDATA\Android\Sdk" }
 Set-Location $PSScriptRoot
+# The offline-play library (Rust). Without it the app still works, just without "Play offline".
+if (Get-Command cargo -ErrorAction SilentlyContinue) {
+    & "$PSScriptRoot\native\build.ps1"
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+} elseif (-not (Test-Path app\src\main\jniLibs\arm64-v8a\libhanab_offline.so)) {
+    Write-Warning "No cargo and no prebuilt library: this build will not have offline play."
+}
 if (-not (Test-Path keystore.properties)) {
     Write-Warning "No keystore.properties: the output will be UNSIGNED and cannot be installed."
 }

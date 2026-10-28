@@ -173,7 +173,10 @@ fun GameScreen(ui: LobbyUiState, g: GameState, vm: LobbyViewModel) {
                     LaunchedEffect(err) { kotlinx.coroutines.delay(6_000); vm.clearError() }
                     ErrorBanner(err, vm::clearError)
                 }
-                if (wide) {
+                if (ui.offline) {
+                    // No chat without a server.
+                    GameBoard(g, vm, ui)
+                } else if (wide) {
                     Row(Modifier.fillMaxSize()) {
                         Box(Modifier.weight(1.5f)) {
                             val d = androidx.compose.ui.platform.LocalDensity.current

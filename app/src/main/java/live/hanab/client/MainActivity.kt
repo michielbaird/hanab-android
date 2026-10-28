@@ -33,7 +33,7 @@ class MainActivity : ComponentActivity() {
     // onPause rather than onStop: a foreground service may only be started while the app is still in front.
     override fun onPause() {
         super.onPause()
-        if (vm.ui.value.loggedIn) KeepAliveService.start(this)
+        if (vm.ui.value.loggedIn && !vm.ui.value.offline) KeepAliveService.start(this)
     }
 
     override fun onResume() {
@@ -65,6 +65,9 @@ class MainActivity : ComponentActivity() {
                     when {
                         !ui.loggedIn -> LoginScreen(ui, vm)
                         game != null -> GameScreen(ui, game, vm)
+                        ui.offline -> androidx.compose.material3.Text(
+                            "Dealing...", Modifier.align(androidx.compose.ui.Alignment.Center),
+                        )
                         ui.joinedTableID != null -> PregameScreen(ui, vm)
                         else -> LobbyScreen(ui, vm)
                     }

@@ -36,3 +36,6 @@ Thumbs.db
 .vscode/
 .claude/
 dist/
+native/*/target/
+app/src/main/jniLibs/
+app/src/debug/jniLibs/

@@ -63,6 +63,11 @@ fun LobbyScreen(ui: LobbyUiState, vm: LobbyViewModel) {
             ) {
                 Text(ui.me?.username ?: "", style = MaterialTheme.typography.titleMedium)
                 Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (live.hanab.client.NativeOffline.available) {
+                        var offline by remember { mutableStateOf(false) }
+                        TextButton(onClick = { offline = true }) { Text("Offline") }
+                        if (offline) OfflineDialog(onStart = vm::startOffline, onDismiss = { offline = false })
+                    }
                     var showSettings by remember { mutableStateOf(false) }
                     TextButton(onClick = { showSettings = true }) { Text("Settings") }
                     if (showSettings) SettingsDialog { showSettings = false }
