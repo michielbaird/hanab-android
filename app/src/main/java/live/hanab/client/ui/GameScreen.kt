@@ -79,6 +79,7 @@ import live.hanab.client.AppSettings
 import live.hanab.client.LobbyUiState
 import live.hanab.client.LobbyViewModel
 import live.hanab.client.game.Card
+import live.hanab.client.game.formatClock
 import live.hanab.client.game.Knowledge
 import live.hanab.client.game.GameState
 import live.hanab.client.game.Phase
@@ -418,7 +419,8 @@ private fun GameBoard(live: GameState, vm: LobbyViewModel, ui: LobbyUiState) {
                     Column(Modifier.turnGlow(g.phase == Phase.Playing && g.currentPlayer == p)) {
                         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                             Text(
-                                g.name(p) + if (g.currentPlayer == p && g.phase == Phase.Playing) "  (turn)" else "",
+                                g.name(p) + (if (g.currentPlayer == p && g.phase == Phase.Playing) "  (turn)" else "") +
+                                    (g.timeOf(p)?.let { "  ·  $it" } ?: ""),
                                 style = MaterialTheme.typography.titleSmall,
                                 modifier = Modifier.weight(1f),
                             )
@@ -462,7 +464,7 @@ private fun GameBoard(live: GameState, vm: LobbyViewModel, ui: LobbyUiState) {
                     val me = if (g.spectating) g.name(g.ourIndex) else "You"
                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                         Text(
-                            me + if (g.ourTurn) "  - your turn" else "",
+                            me + (if (g.ourTurn) "  - your turn" else "") + (g.timeOf(g.ourIndex)?.let { "  ·  $it" } ?: ""),
                             style = MaterialTheme.typography.titleSmall,
                             color = if (g.ourTurn) MaterialTheme.colorScheme.primary else Color.Unspecified,
                             modifier = Modifier.weight(1f),
@@ -1346,6 +1348,15 @@ private fun EndPanel(g: GameState, ui: LobbyUiState, onWatch: () -> Unit, vm: Lo
             Text(g.endText, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
             Text("Score ${g.finalScore} / ${g.scoreDenominator}", style = MaterialTheme.typography.titleMedium)
             Text(g.playerNames.joinToString(", "), style = MaterialTheme.typography.bodySmall)
+            if (g.playerTimes.isNotEmpty()) {
+                // What the server measured for each player (the website shows it one step on in a replay).
+                Text(
+                    (if (g.options.timed) "Time left: " else "Time taken: ") +
+                        g.playerNames.zip(g.playerTimes) { n, t -> "$n ${g.clockOf(t)}" }.joinToString(", ") +
+                        (if (g.durationMs > 0) "  ·  game ${formatClock(g.durationMs)}" else ""),
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
             ui.error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button(onClick = onWatch) { Text("Watch replay") }

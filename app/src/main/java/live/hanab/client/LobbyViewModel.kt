@@ -724,7 +724,7 @@ class LobbyViewModel(app: Application) : AndroidViewModel(app) {
         val gameOptions = live.hanab.client.game.GameOptions(
             emptyClues = flag("emptyClues"), cardCycle = flag("cardCycle"), deckPlays = flag("deckPlays"),
             allOrNothing = flag("allOrNothing"), detrimentalCharacters = flag("detrimentalCharacters"),
-            speedrun = flag("speedrun"),
+            speedrun = flag("speedrun"), timed = flag("timed"),
         )
         val assignments = d["characterAssignments"] as? JsonArray
         val metadata = d["characterMetadata"] as? JsonArray

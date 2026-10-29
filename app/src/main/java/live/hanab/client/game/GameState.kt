@@ -33,6 +33,8 @@ data class GameOptions(
     val allOrNothing: Boolean = false,
     val detrimentalCharacters: Boolean = false,
     val speedrun: Boolean = false,
+    /** A timed game: the times at the end are what each player has left, not what they used. */
+    val timed: Boolean = false,
 )
 
 /** One person's note on a card. Notes are per person: players and spectators each keep their own. */
@@ -125,8 +127,21 @@ data class GameState(
     val revealAll: Boolean = false,
     /** EndCondition value from the server (1 = normal, 2 = strikeout, 4/10 = terminated, ...). */
     val endCondition: Int? = null,
+    /** Each player's time at the end of the game, in milliseconds (the server sends it after the last turn). */
+    val playerTimes: List<Long> = emptyList(),
+    /** How long the whole game took, in milliseconds. */
+    val durationMs: Long = 0L,
 ) {
     val numPlayers get() = playerNames.size
+
+    /**
+     * A time from the server as the website writes it. In a timed game it is what the player has left; in an untimed
+     * one the server counts down from 0 into the negatives, so what the player took is the same number without the sign.
+     */
+    fun clockOf(ms: Long): String = formatClock(if (options.timed) ms else -ms)
+
+    /** Player [p]'s time at the end of the game, once the server has sent it. */
+    fun timeOf(p: Int): String? = playerTimes.getOrNull(p)?.let { clockOf(it) }
 
     /** The other players in the order they will act after us; the last one acts just before us. */
     val othersInTurnOrder: List<Int> get() = (1 until numPlayers).map { (ourIndex + it) % numPlayers }
@@ -334,6 +349,12 @@ data class GameState(
             "strike" -> copy(strikes = int("num"))
             "turn" -> copy(turn = int("num"), currentPlayer = int("currentPlayerIndex"))
             "gameOver" -> copy(phase = Phase.Over, endCondition = int("endCondition")).logged("Game over")
+            // After the last turn: what each player used (or, in a timed game, had left). Seen one step on in a replay.
+            "playerTimes" -> copy(
+                playerTimes = (a["playerTimes"] as? kotlinx.serialization.json.JsonArray)
+                    ?.map { it.jsonPrimitive.content.toLongOrNull() ?: 0L }.orEmpty(),
+                durationMs = a["duration"]?.jsonPrimitive?.content?.toLongOrNull() ?: 0L,
+            )
             else -> this
         }
     }
@@ -451,4 +472,13 @@ data class GameState(
     companion object {
         fun totalCards(numSuits: Int) = numSuits * 10
     }
+}
+
+/** A time in milliseconds as the website writes it: 4:05, or 1:02:09 from an hour on. */
+fun formatClock(ms: Long): String {
+    val seconds = (ms.coerceAtLeast(0) + 500) / 1000
+    val h = seconds / 3600
+    val m = seconds / 60 % 60
+    val s = seconds % 60
+    return if (h > 0) "%d:%02d:%02d".format(h, m, s) else "%d:%02d".format(m, s)
 }

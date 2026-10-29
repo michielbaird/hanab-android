@@ -375,7 +375,16 @@ mod tests {
         assert!(record["endCondition"] == 1 || record["endCondition"] == 2);
         let actions = record["actions"].as_array().unwrap();
         assert!(actions.len() > 17);
-        assert_eq!(actions.last().unwrap()["currentPlayerIndex"], -1);
+        // The last turn, then what the site sends after it: each player's time and how long the game took.
+        let times = actions.last().unwrap();
+        assert_eq!(times["type"], "playerTimes");
+        let used = times["playerTimes"].as_array().unwrap();
+        assert_eq!(used.len(), 3);
+        // An untimed game counts down from 0, like the site: what a player took is minus the number.
+        assert!(used.iter().all(|t| t.as_i64().unwrap() <= 0));
+        assert!(used.iter().any(|t| t.as_i64().unwrap() < 0));
+        assert!(times["duration"].as_u64().unwrap() > 0);
+        assert_eq!(actions[actions.len() - 2]["currentPlayerIndex"], -1);
         // A replay shows every card, including the ones the human was dealt.
         assert!(actions.iter().filter(|a| a["type"] == "draw").all(|a| a["suitIndex"] != -1));
 

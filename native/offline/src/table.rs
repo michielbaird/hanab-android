@@ -99,6 +99,8 @@ struct Table<'a> {
     names: Vec<String>,
     /// Every action of the game with all cards shown, as a replay needs them (see `offlineRecord`).
     record: RefCell<Vec<Value>>,
+    /// Milliseconds each seat has used: you while the table waited for you, a bot while it was working out its move.
+    times: RefCell<Vec<u64>>,
     started: Instant,
     started_at_ms: u64,
 }
@@ -185,6 +187,7 @@ impl<'a> Table<'a> {
             games,
             names,
             record: RefCell::new(Vec::new()),
+            times: RefCell::new(vec![0; num]),
             started: Instant::now(),
             started_at_ms: 0,
         }
@@ -274,7 +277,10 @@ impl<'a> Table<'a> {
             }
             let current = self.games[0].state.current_player_index;
             let perform = if current == self.human {
-                match self.human_move() {
+                let waited = Instant::now();
+                let chosen = self.human_move();
+                self.times.borrow_mut()[current] += waited.elapsed().as_millis() as u64;
+                match chosen {
                     Some(p) => p,
                     None => return End::Closed,
                 }
@@ -284,6 +290,7 @@ impl<'a> Table<'a> {
                 let started = Instant::now();
                 let bot = &self.games[current];
                 let chosen = catch_unwind(AssertUnwindSafe(|| bot.take_action()));
+                self.times.borrow_mut()[current] += started.elapsed().as_millis() as u64;
                 let pause = Duration::from_millis(self.cfg.pace_ms);
                 if let Some(rest) = pause.checked_sub(started.elapsed()) {
                     std::thread::sleep(rest);
@@ -472,6 +479,15 @@ impl<'a> Table<'a> {
         self.emit(over);
         let turn = json!({"type": "turn", "num": self.games[0].state.turn_count - 1, "currentPlayerIndex": -1});
         self.emit(turn);
+        // As the site does after the last turn: what each player used and how long the game took. In a replay it
+        // is seen one step on from the end.
+        let times = json!({
+            // Minus the time used, as the site counts an untimed game: down from 0.
+            "type": "playerTimes",
+            "playerTimes": self.times.borrow().iter().map(|&ms| -(ms as i64)).collect::<Vec<_>>(),
+            "duration": self.started.elapsed().as_millis() as u64,
+        });
+        self.emit(times);
         // A game that ran its course (not one given up) is handed to the app to keep.
         if condition == 1 || condition == 2 {
             let s = &self.games[0].state;
