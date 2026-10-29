@@ -345,6 +345,17 @@ private fun GameBoard(live: GameState, vm: LobbyViewModel, ui: LobbyUiState) {
     // Height of the clue panel, kept between turns. The hands are sized as if the panel were not there, so
     // opening it never rescales them; the hands area just becomes scrollable.
     var cluePanelPx by remember { mutableFloatStateOf(0f) }
+    // The bot's analysis of this game, once run, is a box with arrows under the hands (sized into the hands the same way).
+    val analysisDone = ui.analysis as? live.hanab.client.AnalysisUi.Done
+    // A replay (of the website's game, shared or solo, or a saved offline game) is a finished game even when it is
+    // not drawn as "over".
+    val isReplayView = ui.replay != null || ui.replayDatabaseID > 0 || ui.offlineReplayId != null
+    val analysisMatches = analysisDone != null && (live.phase == Phase.Over || isReplayView) &&
+        analysisDone.request.online == !ui.offline && analysisDone.request.id == analysisGameId(ui)
+    var analysisBoxPx by remember { mutableFloatStateOf(0f) }
+    var analysisSel by remember(analysisDone) { mutableStateOf<Int?>(null) }
+    var mistakesOnly by remember(analysisDone) { mutableStateOf(false) }
+    var showAnalysisList by remember { mutableStateOf(false) }
     // Cards the clue being composed would touch (only while composing on our turn).
     val highlighted: Set<Int> = if (!g.ourTurn) emptySet() else clueChoice?.let { c ->
         g.hands[cluePartner].filter { o ->
@@ -375,7 +386,8 @@ private fun GameBoard(live: GameState, vm: LobbyViewModel, ui: LobbyUiState) {
             }
             androidx.compose.foundation.layout.BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
             val outer = androidx.compose.ui.platform.LocalDensity.current
-            val availPx = with(outer) { maxHeight.toPx() } + if (g.ourTurn && showClue) cluePanelPx else 0f
+            val availPx = with(outer) { maxHeight.toPx() } + (if (g.ourTurn && showClue) cluePanelPx else 0f) +
+                (if (analysisMatches) analysisBoxPx else 0f)
             // Width: the widest hand (one card is 62dp with its margin, 2dp between cards) must fit.
             val widthScale = (g.othersInTurnOrder.map { g.hands[it].size } + g.hands[g.ourIndex].size)
                 .maxOrNull()?.let { n -> if (n > 0) (maxWidth - 12.dp) / (60.dp * n + 2.dp * (n - 1)) else 1f } ?: 1f
@@ -494,6 +506,9 @@ private fun GameBoard(live: GameState, vm: LobbyViewModel, ui: LobbyUiState) {
                 }
                 if (g.phase == Phase.Over && !g.readOnly) {
                     EndPanel(g, ui, onWatch = { reviewIdx = 0 }, vm = vm)
+                } else if (g.phase == Phase.Over || isReplayView) {
+                    // A replay: no end panel, but the bot can still go through the game, and bring its analysis back.
+                    AnalyzeButton(g, ui, vm)
                 }
                 Column {
                     g.log.takeLast(5).forEach { Text(it.text, style = MaterialTheme.typography.bodySmall) }
@@ -507,6 +522,41 @@ private fun GameBoard(live: GameState, vm: LobbyViewModel, ui: LobbyUiState) {
             if (g.ourTurn && showClue) {
                 Box(Modifier.onSizeChanged { cluePanelPx = it.height.toFloat() }) {
                     CluePanel(g, vm, partners, cluePartner, { cluePartner = it }, clueChoice, { clueChoice = it })
+                }
+            }
+            if (analysisMatches && analysisDone != null) {
+                val list = if (mistakesOnly) analysisDone.comments.filter { it.mistake } else analysisDone.comments
+                val lastStop = (live.turnStops.size - 1).coerceAtLeast(0)
+                // The position before the move a comment is about: turn n is the n-th move, stop n - 1.
+                fun stopOf(c: live.hanab.client.AnalysisComment) = (c.turn - 1).coerceIn(0, lastStop)
+                val here = reviewIdx ?: lastStop
+                // Stepping the replay by hand onto a turn with a comment shows that comment.
+                LaunchedEffect(reviewIdx, list) {
+                    val i = list.indexOfFirst { stopOf(it) == (reviewIdx ?: lastStop) }
+                    if (i >= 0) analysisSel = i
+                }
+                // Going to a comment moves the replay; the leader of a shared replay moves everyone's (see setReview).
+                fun select(i: Int) {
+                    analysisSel = i
+                    setReview(stopOf(list[i]))
+                }
+                Box(Modifier.onSizeChanged { analysisBoxPx = it.height.toFloat() }) {
+                    AnalysisBox(
+                        comment = analysisSel?.let { list.getOrNull(it) },
+                        position = analysisSel?.plus(1)?.takeIf { it <= list.size },
+                        total = list.size,
+                        mistakesOnly = mistakesOnly,
+                        canFilter = analysisDone.comments.any { it.mistake } && analysisDone.comments.any { !it.mistake },
+                        onMistakesOnly = { mistakesOnly = it; analysisSel = null },
+                        onPrev = {
+                            if (list.isNotEmpty()) select(list.indexOfLast { stopOf(it) < here }.takeIf { it >= 0 } ?: list.lastIndex)
+                        },
+                        onNext = {
+                            if (list.isNotEmpty()) select(list.indexOfFirst { stopOf(it) > here }.takeIf { it >= 0 } ?: 0)
+                        },
+                        onList = { showAnalysisList = true },
+                        onClose = vm::closeAnalysis,
+                    )
                 }
             }
             // Pinned at the bottom, where the thumb is: game info on the left, playback buttons on the right.
@@ -539,6 +589,13 @@ private fun GameBoard(live: GameState, vm: LobbyViewModel, ui: LobbyUiState) {
     }
 
     if (showDiscards) DiscardDialog(g) { showDiscards = false }
+    if (showAnalysisList && analysisDone != null) {
+        AnalysisResultDialog(
+            analysisDone,
+            onAgain = { showAnalysisList = false; vm.analyzeAgain(analysisDone.request) },
+            onClose = { showAnalysisList = false },
+        )
+    }
     if (showTerminate && canTerminate) {
         TerminateDialog(
             voted = ui.terminateVote,
@@ -562,7 +619,6 @@ private fun GameBoard(live: GameState, vm: LobbyViewModel, ui: LobbyUiState) {
             },
         )
     }
-    AnalysisDialog(ui, vm)
     noteFor?.let { order ->
         NotesDialog(g, order, myName, canEditNotes, onSave = { vm.setNote(order, it); noteFor = null }, onDismiss = { noteFor = null })
     }
@@ -1257,14 +1313,34 @@ private fun BinIcon(modifier: Modifier, color: Color = Color.Black) {
     }
 }
 
+/**
+ * "Analyze": the bot, on this phone, goes through the finished game. It knows which game it is for a game of the
+ * website (its replay id, also when watching it as a replay) and for an offline game (the one just kept, or the
+ * saved one being replayed). Nothing is shown when the game cannot be told, or where the library is not packaged.
+ */
+@Composable
+private fun AnalyzeButton(g: GameState, ui: LobbyUiState, vm: LobbyViewModel) {
+    val id = analysisGameId(ui)
+    if (id == null || !live.hanab.client.NativeOffline.available) return
+    val context = androidx.compose.ui.platform.LocalContext.current
+    // A kept analysis opens straight away, so the button reads "Analysis" rather than "Analyze".
+    val kept = remember(id, ui.analysis) { live.hanab.client.AnalysisStore.exists(context, !ui.offline, id) }
+    OutlinedButton(onClick = {
+        vm.askAnalysis(
+            live.hanab.client.AnalysisRequest(
+                "${g.variantName} · ${g.playerNames.joinToString(", ")}", g.variantName,
+                live.hanab.client.BotStore.convention, online = !ui.offline, id = id,
+            ),
+        )
+    }) { Text(if (kept) "Analysis" else "Analyze") }
+}
+
 /** Shown when the game is over: result, share link, play again, and a way into the shared replay. */
 @Composable
 private fun EndPanel(g: GameState, ui: LobbyUiState, onWatch: () -> Unit, vm: LobbyViewModel) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val replay = ui.replay
     val link = replay?.takeIf { it.databaseID > 0 }?.let { "https://hanab.live/shared-replay/${it.databaseID}" }
-    var showAnalyze by remember { mutableStateOf(false) }
-    val onlineBots = ui.users.values.map { it.name }.filter { live.hanab.client.BotStore.isBot(it) }.sortedBy { it.lowercase() }
     Surface(tonalElevation = 4.dp, shape = RoundedCornerShape(12.dp)) {
         Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text(g.endText, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
@@ -1275,6 +1351,7 @@ private fun EndPanel(g: GameState, ui: LobbyUiState, onWatch: () -> Unit, vm: Lo
                 Button(onClick = onWatch) { Text("Watch replay") }
                 if (!g.spectating) OutlinedButton(onClick = vm::restartTable) { Text("Play again") }
             }
+            AnalyzeButton(g, ui, vm)
             if (link != null) {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     OutlinedButton(onClick = {
@@ -1290,15 +1367,8 @@ private fun EndPanel(g: GameState, ui: LobbyUiState, onWatch: () -> Unit, vm: Lo
                         )
                     }) { Text("Open on web") }
                 }
-                // Your bots can review the finished game (/analyze <replay id> <conventions>).
-                if (live.hanab.client.BotStore.bots.isNotEmpty()) {
-                    OutlinedButton(onClick = { showAnalyze = true }) { Text("Analyze with a bot") }
-                }
             }
         }
-    }
-    if (showAnalyze && replay != null) {
-        AnalyzeDialog(onlineBots, { bot, conv -> vm.analyzeWithBot(bot, replay.databaseID, conv) }, { showAnalyze = false })
     }
 }
 

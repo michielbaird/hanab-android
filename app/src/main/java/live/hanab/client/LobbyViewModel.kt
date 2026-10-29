@@ -10,6 +10,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
@@ -19,6 +20,7 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.longOrNull
 import live.hanab.client.ui.PipSettings
 import live.hanab.client.ui.PipStore
 import live.hanab.client.game.GameState
@@ -57,9 +59,6 @@ data class LobbyUiState(
     val terminateVote: Boolean = false,
     /** Latest progress / failure text per bot being invited (key = bot name). */
     val botStatus: Map<String, String> = emptyMap(),
-    /** Bot whose "/analyze" reply is on screen, and how many PMs from it existed when we asked. */
-    val analysisBot: String? = null,
-    val analysisFrom: Int = 0,
     val draws: List<live.hanab.client.game.DrawEvent> = emptyList(),
     /** True while the connection is down and we are signing back in; the screen stays as it was. */
     val reconnecting: Boolean = false,
@@ -81,6 +80,14 @@ data class LobbyUiState(
     val profile: String? = null,
     /** The stats and games from offline play are on screen. */
     val offlineStats: Boolean = false,
+    /** The id of the offline game that has just been kept, so it can be analysed from its end panel. */
+    val lastOfflineGame: Long? = null,
+    /** The bot's analysis of a game: choosing conventions, running, or its result. */
+    val analysis: AnalysisUi? = null,
+    /** The website's id of the game or replay on screen (0 if it has none), so it can be analysed. */
+    val replayDatabaseID: Int = 0,
+    /** The id of the saved offline game being replayed, so it can be analysed. */
+    val offlineReplayId: Long? = null,
 )
 
 class LobbyViewModel(app: Application) : AndroidViewModel(app) {
@@ -183,6 +190,80 @@ class LobbyViewModel(app: Application) : AndroidViewModel(app) {
         }
         statsAfterOffline = true
         enterOffline(client.startOfflineReplay(viewModelScope, record))
+        if (_ui.value.offline) _ui.update { it.copy(offlineReplayId = id) }
+    }
+
+    // ---------------------------------------------------------------- analysis (the bot, on this phone)
+
+    private var analysisJob: Job? = null
+
+    /**
+     * Opens the analysis of a game: the one kept from before if there is one, otherwise the offer to run it (nothing
+     * runs until [startAnalysis]).
+     */
+    fun askAnalysis(request: AnalysisRequest) {
+        val app = getApplication<Application>()
+        viewModelScope.launch {
+            val kept = withContext(kotlinx.coroutines.Dispatchers.IO) { AnalysisStore.load(app, request) }
+            _ui.update { it.copy(analysis = kept ?: AnalysisUi.Setup(request)) }
+        }
+    }
+
+    /** Offers to run the analysis again, say with other conventions. */
+    fun analyzeAgain(request: AnalysisRequest) = _ui.update { it.copy(analysis = AnalysisUi.Setup(request)) }
+
+    /** Opens the replay of an analysed game from its analysis; the analysis then shows under the hands. */
+    fun watchAnalysed(request: AnalysisRequest) {
+        if (request.online) openReplay(request.id.toInt()) else openOfflineReplay(request.id)
+    }
+
+    fun closeAnalysis() {
+        analysisJob?.cancel()
+        _ui.update { it.copy(analysis = null) }
+    }
+
+    /** Goes through the game with the bot using [convention]; works for games of the website and offline games. */
+    fun startAnalysis(convention: String) {
+        val request = (_ui.value.analysis as? AnalysisUi.Setup)?.request ?: return
+        fun fail(message: String) = _ui.update { it.copy(analysis = AnalysisUi.Failed(request, message)) }
+        if (!NativeOffline.available) return fail("The bot's analysis is not available on this phone.")
+        if (request.variant !in Variants.botSupported()) return fail("The bot cannot play ${request.variant}, so it cannot analyze it.")
+        BotStore.remember(convention, BotStore.fast)
+        _ui.update { it.copy(analysis = AnalysisUi.Running(request, convention, System.currentTimeMillis())) }
+        val app = getApplication<Application>()
+        analysisJob?.cancel()
+        analysisJob = viewModelScope.launch {
+            var handle = 0L
+            try {
+                val game = if (request.online) live.hanab.client.net.ProfileApi.export(request.id)
+                else withContext(kotlinx.coroutines.Dispatchers.IO) { OfflineStore.record(app, request.id) }
+                    ?: return@launch fail("That saved game could not be found.")
+                handle = withContext(kotlinx.coroutines.Dispatchers.Default) {
+                    val variants = app.assets.open("variants.json").bufferedReader().use { it.readText() }
+                    val suits = app.assets.open("suits.json").bufferedReader().use { it.readText() }
+                    NativeOffline.analyzeStart(variants, suits, game, request.variant, convention)
+                }
+                if (handle == 0L) return@launch fail("The analysis could not start.")
+                while (true) {
+                    val reply = NativeOffline.analyzePoll(handle)
+                    if (reply.startsWith("result ")) {
+                        val comments = parseAnalysis(reply.removePrefix("result "))
+                        withContext(kotlinx.coroutines.Dispatchers.IO) { AnalysisStore.save(app, request, convention, comments) }
+                        _ui.update { it.copy(analysis = AnalysisUi.Done(request, convention, comments)) }
+                        return@launch
+                    }
+                    val (done, total) = reply.removePrefix("progress ").split(' ').map { it.toIntOrNull() ?: 0 }
+                    _ui.update { s -> (s.analysis as? AnalysisUi.Running)?.let { s.copy(analysis = it.copy(done = done, total = total)) } ?: s }
+                    kotlinx.coroutines.delay(250)
+                }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                // Closing the analysis stops the bot between moves.
+                if (handle != 0L) NativeOffline.analyzeCancel(handle)
+                throw e
+            } catch (e: Exception) {
+                fail(if (request.online) "Could not analyze the game: ${e.message}" else (e.message ?: "The analysis failed."))
+            }
+        }
     }
 
     fun openOfflineStats() = _ui.update { it.copy(offlineStats = true) }
@@ -201,7 +282,11 @@ class LobbyViewModel(app: Application) : AndroidViewModel(app) {
         }
         val wasOnline = _ui.value.loggedIn && !_ui.value.offline
         // The offline screen first, so closing the socket below is not mistaken for a dropped connection.
-        _ui.value = LobbyUiState(me = Welcome(username = "You"), loggedIn = true, offline = true, connection = ConnState.Connected)
+        // The analysis stays: watching a game from its analysis shows the analysis under the replay.
+        val analysis = _ui.value.analysis
+        _ui.value = LobbyUiState(
+            me = Welcome(username = "You"), loggedIn = true, offline = true, connection = ConnState.Connected, analysis = analysis,
+        )
         if (wasOnline) {
             resumeOnline = true
             reconnectJob?.cancel()
@@ -412,15 +497,6 @@ class LobbyViewModel(app: Application) : AndroidViewModel(app) {
     fun leaveAllBots() = sendTableChat("/leaveall")
 
     fun dismissBotStatus(bot: String) = setBotStatus(bot, null)
-
-    /** Ask [bot] to analyse a finished game; its replies are shown from now on. */
-    fun analyzeWithBot(bot: String, databaseID: Int, convention: String) {
-        BotStore.remember(convention, BotStore.fast)
-        _ui.update { it.copy(analysisBot = bot, analysisFrom = it.pms[bot].orEmpty().size) }
-        sendPm(bot, "/analyze $databaseID $convention")
-    }
-
-    fun closeAnalysis() = _ui.update { it.copy(analysisBot = null) }
 
     fun sendPm(recipient: String, text: String) {
         if (text.isBlank()) return
@@ -665,7 +741,7 @@ class LobbyViewModel(app: Application) : AndroidViewModel(app) {
             d["databaseID"]?.jsonPrimitive?.intOrNull ?: 0,
             d["sharedReplayLeader"]?.jsonPrimitive?.content.orEmpty(),
         ) else null
-        _ui.update { it.copy(game = stateWithOptions, joinedTableID = tableID, replay = replay, sharedSegment = null, terminateVote = false) }
+        _ui.update { it.copy(lastOfflineGame = null, replayDatabaseID = d["databaseID"]?.jsonPrimitive?.intOrNull ?: 0, game = stateWithOptions, joinedTableID = tableID, replay = replay, sharedSegment = null, terminateVote = false) }
         client.send("getGameInfo2", buildJsonObject { put("tableID", tableID) })
     }
 
@@ -784,6 +860,7 @@ class LobbyViewModel(app: Application) : AndroidViewModel(app) {
                 // The offline table sends the game when it ends; keep it for the offline stats.
                 val app = getApplication<Application>()
                 viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) { runCatching { OfflineStore.save(app, record.toString()) } }
+                record["startedAt"]?.jsonPrimitive?.longOrNull?.let { id -> _ui.update { it.copy(lastOfflineGame = id) } }
             }
             "left" -> _ui.update { it.copy(joinedTableID = null, game = null, tableChat = emptyList(), replay = null, sharedSegment = null) }
             "tableStart" -> (m.data as? JsonObject)?.let { d ->

@@ -54,7 +54,13 @@ private val GOLD = Color(0xFFFFC107)
 
 /** A player's profile like the website's: the facts and a grid of variants, with the game history behind a button. */
 @Composable
-fun ProfileScreen(name: String, source: ProfileSource, onBack: () -> Unit, onOpenReplay: (Long) -> Unit) {
+fun ProfileScreen(
+    name: String,
+    source: ProfileSource,
+    onBack: () -> Unit,
+    onOpenReplay: (Long) -> Unit,
+    onAnalyze: (GameLine) -> Unit,
+) {
     val pvm: ProfileViewModel = viewModel()
     LaunchedEffect(name) { pvm.open(name, source) }
     val ui by pvm.ui.collectAsStateWithLifecycle()
@@ -68,7 +74,7 @@ fun ProfileScreen(name: String, source: ProfileSource, onBack: () -> Unit, onOpe
                 TextButton(onClick = back) { Text("Back") }
                 Text(if (inHistory) "$name · games" else name, style = MaterialTheme.typography.titleLarge)
             }
-            if (inHistory) HistoryView(ui, pvm, onOpenReplay) else StatsView(ui, pvm)
+            if (inHistory) HistoryView(ui, pvm, onOpenReplay, onAnalyze) else StatsView(ui, pvm)
         }
     }
 }
@@ -227,7 +233,7 @@ private fun Pager(page: Int, pages: Int, onPage: (Int) -> Unit) {
 // ------------------------------------------------------------------------------------------ history
 
 @Composable
-private fun HistoryView(ui: ProfileUi, pvm: ProfileViewModel, onOpenReplay: (Long) -> Unit) {
+private fun HistoryView(ui: ProfileUi, pvm: ProfileViewModel, onOpenReplay: (Long) -> Unit, onAnalyze: (GameLine) -> Unit) {
     LazyColumn(Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
         item {
             Filters(ui, pvm::setPlayers, pvm::setVariant)
@@ -239,7 +245,7 @@ private fun HistoryView(ui: ProfileUi, pvm: ProfileViewModel, onOpenReplay: (Lon
             Pager(ui.historyPage, ui.historyPages, pvm::setHistoryPage)
         }
         items(ui.history, key = { it.id }) { line ->
-            GameRow(line) { onOpenReplay(line.id) }
+            GameRow(line, onAnalyze = { onAnalyze(line) }) { onOpenReplay(line.id) }
             HorizontalDivider()
         }
         item {
@@ -291,7 +297,7 @@ private fun Filters(ui: ProfileUi, onPlayers: (Int?) -> Unit, onVariant: (String
 }
 
 @Composable
-private fun GameRow(line: GameLine, onClick: () -> Unit) {
+private fun GameRow(line: GameLine, onAnalyze: () -> Unit, onClick: () -> Unit) {
     val max = line.max
     val perfect = max != null && line.score == max
     Row(Modifier.fillMaxWidth().clickable(onClick = onClick).padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -309,5 +315,9 @@ private fun GameRow(line: GameLine, onClick: () -> Unit) {
             fontWeight = if (perfect) FontWeight.Bold else FontWeight.Normal,
             color = if (perfect) GOLD else Color.Unspecified,
         )
+        // The bot, on this phone, goes through the game (not offered where the library is not packaged).
+        if (live.hanab.client.NativeOffline.available) {
+            TextButton(onClick = onAnalyze) { Text("Analyze") }
+        }
     }
 }

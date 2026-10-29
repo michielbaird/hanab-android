@@ -1,4 +1,5 @@
 //! JNI surface of the offline table: start a game, send the app's commands, poll for the table's messages.
+mod analysis;
 mod rng_cooked;
 mod seed;
 mod table;
@@ -131,6 +132,73 @@ pub extern "system" fn Java_live_hanab_client_NativeOffline_startReplay<'l>(
         Err(e) => json!({"error": e.to_string()}),
     };
     to_java(&mut env, &reply.to_string())
+}
+
+fn analyses() -> &'static Mutex<HashMap<i64, Arc<analysis::Job>>> {
+    static ANALYSES: OnceLock<Mutex<HashMap<i64, Arc<analysis::Job>>>> = OnceLock::new();
+    ANALYSES.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// Starts the bot's analysis of a finished game on a thread of its own and returns its handle (0 if it could not
+/// be started). `game_json` is the website's export of the game or an `offlineRecord`. Ask how it is doing with
+/// `analyzePoll`; stop it with `analyzeCancel`.
+#[no_mangle]
+pub extern "system" fn Java_live_hanab_client_NativeOffline_analyzeStart<'l>(
+    mut env: JNIEnv<'l>,
+    _class: JClass<'l>,
+    variants_json: JString<'l>,
+    suits_json: JString<'l>,
+    game_json: JString<'l>,
+    variant: JString<'l>,
+    convention: JString<'l>,
+) -> jlong {
+    let (v, s, g) = (text(&mut env, &variants_json), text(&mut env, &suits_json), text(&mut env, &game_json));
+    let (variant, convention) = (text(&mut env, &variant), text(&mut env, &convention));
+    if init_variants(&v, &s).is_err() {
+        return 0;
+    }
+    static NEXT_ANALYSIS: OnceLock<Mutex<i64>> = OnceLock::new();
+    let mut next = NEXT_ANALYSIS.get_or_init(|| Mutex::new(0)).lock().unwrap();
+    *next += 1;
+    let handle = *next;
+    let job = Arc::new(analysis::Job::default());
+    analyses().lock().unwrap().insert(handle, Arc::clone(&job));
+    analysis::spawn(job, g, variant, convention);
+    handle
+}
+
+/// How an analysis is doing: `progress <moves done> <moves in all>` while it runs, then (once) `result <json>` with
+/// `{"players", "comments"}` or `{"error"}`. An unknown handle (finished, cancelled) answers `result {"error": ...}`.
+#[no_mangle]
+pub extern "system" fn Java_live_hanab_client_NativeOffline_analyzePoll<'l>(
+    mut env: JNIEnv<'l>,
+    _class: JClass<'l>,
+    handle: jlong,
+) -> jstring {
+    let job = analyses().lock().unwrap().get(&handle).cloned();
+    let reply = match job {
+        None => format!("result {}", json!({"error": "The analysis is not running."})),
+        Some(job) => match job.result.lock().unwrap().take() {
+            Some(result) => {
+                analyses().lock().unwrap().remove(&handle);
+                format!("result {result}")
+            }
+            None => format!(
+                "progress {} {}",
+                job.moves_done.load(std::sync::atomic::Ordering::Relaxed),
+                job.moves_total.load(std::sync::atomic::Ordering::Relaxed),
+            ),
+        },
+    };
+    to_java(&mut env, &reply)
+}
+
+/// Stops an analysis between moves. Its handle is forgotten; the thread finishes on its own and the answer is dropped.
+#[no_mangle]
+pub extern "system" fn Java_live_hanab_client_NativeOffline_analyzeCancel<'l>(_env: JNIEnv<'l>, _class: JClass<'l>, handle: jlong) {
+    if let Some(job) = analyses().lock().unwrap().remove(&handle) {
+        job.cancel.store(true, std::sync::atomic::Ordering::Relaxed);
+    }
 }
 
 /// Passes one command of the app to the table.
@@ -356,6 +424,57 @@ mod tests {
         assert_eq!(seen, 10); // the two other hands of five
         send(h, "tableUnattend", json!({"tableID": 1}));
         let _ = tables().lock().unwrap().remove(&h);
+    }
+
+    /// The bot comments on a real game of the site and on a game played offline.
+    #[test]
+    fn analyses_a_real_game_and_an_offline_game() {
+        init_variants(VARIANTS, SUITS).unwrap();
+        let real = analysis::analyze_blocking(include_str!("../tests/data/export_2046249.json"), "No Variant", "HGroup5").unwrap();
+        let real: Value = serde_json::from_str(&real).unwrap();
+        assert_eq!(real["players"].as_array().unwrap().len(), 3);
+        assert!(real["comments"].is_array());
+
+        let record = play_scripted("No Variant", 3, 7, false).unwrap();
+        let mine = analysis::analyze_blocking(&record.to_string(), "No Variant", "HGroup1").unwrap();
+        let mine: Value = serde_json::from_str(&mine).unwrap();
+        // The scripted human only discards, so the bot has things to say about it.
+        let comments = mine["comments"].as_array().unwrap();
+        assert!(!comments.is_empty());
+        assert!(comments.iter().all(|c| c["text"].is_string() && c["player"].is_number()));
+
+        assert!(analysis::analyze_blocking("not json", "No Variant", "HGroup1").is_err());
+        assert!(analysis::analyze_blocking(&record.to_string(), "No Variant", "NoSuchConvention").is_err());
+    }
+
+    /// A running analysis reports how many moves it has looked at, and one that is cancelled stops with an error.
+    #[test]
+    fn an_analysis_reports_progress_and_can_be_cancelled() {
+        init_variants(VARIANTS, SUITS).unwrap();
+        let game = include_str!("../tests/data/export_2046249.json").to_string();
+        let wait = |job: &analysis::Job| -> Value {
+            for _ in 0..6000 {
+                if let Some(text) = job.result.lock().unwrap().clone() {
+                    return serde_json::from_str(&text).unwrap();
+                }
+                std::thread::sleep(Duration::from_millis(50));
+            }
+            panic!("the analysis did not finish");
+        };
+
+        let job = Arc::new(analysis::Job::default());
+        analysis::spawn(Arc::clone(&job), game.clone(), "No Variant".into(), "HGroup5".into());
+        let done = wait(&job);
+        assert!(done["comments"].is_array(), "{done}");
+        let total = job.moves_total.load(std::sync::atomic::Ordering::Relaxed);
+        assert!(total > 0);
+        assert_eq!(job.moves_done.load(std::sync::atomic::Ordering::Relaxed), total);
+
+        let stopped = Arc::new(analysis::Job::default());
+        stopped.cancel.store(true, std::sync::atomic::Ordering::Relaxed);
+        analysis::spawn(Arc::clone(&stopped), game, "No Variant".into(), "HGroup5".into());
+        let result = wait(&stopped);
+        assert!(result["error"].as_str().unwrap().contains("cancelled"), "{result}");
     }
 
     /// You made the table, so you sit where the site seated the creator of a real game on this seed.
