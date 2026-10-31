@@ -6,6 +6,7 @@ mod table;
 
 use std::collections::HashMap;
 use std::sync::mpsc::{channel, Sender};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
@@ -32,7 +33,25 @@ fn tables() -> &'static Mutex<HashMap<i64, Running>> {
 /// reads them is not safe).
 fn init_variants(variants: &str, suits: &str) -> Result<(), String> {
     static LOADED: OnceLock<Result<(), String>> = OnceLock::new();
-    LOADED.get_or_init(|| Variant::init(variants, suits)).clone()
+    LOADED
+        .get_or_init(|| {
+            apply_threads();
+            Variant::init(variants, suits)
+        })
+        .clone()
+}
+
+/// The most threads one endgame search gets: more than this rarely helps and the phone has other things to do.
+const MAX_ENDGAME_THREADS: usize = 4;
+
+/// How many threads the app allows an endgame search (it lowers this when the battery is low).
+static WANTED_THREADS: AtomicUsize = AtomicUsize::new(MAX_ENDGAME_THREADS);
+
+/// Gives the bot's endgame search the allowed number of threads, never more than the phone has cores. The bot picks
+/// the same move for any number of threads; fewer only make a hard search likelier to run out of time.
+fn apply_threads() {
+    let cores = std::thread::available_parallelism().map_or(1, |n| n.get());
+    hanab_bot::endgame::solver::set_default_threads(WANTED_THREADS.load(Ordering::Relaxed).min(cores));
 }
 
 fn start(variants: &str, suits: &str, config: &str) -> Result<i64, String> {
@@ -87,6 +106,13 @@ fn text(env: &mut JNIEnv, s: &JString) -> String {
 
 fn to_java(env: &mut JNIEnv, s: &str) -> jstring {
     env.new_string(s).map(|j| j.into_raw()).unwrap_or(std::ptr::null_mut())
+}
+
+/// How many threads one endgame search may use from now on (1 to 4); the app lowers it on a low battery.
+#[no_mangle]
+pub extern "system" fn Java_live_hanab_client_NativeOffline_setThreads<'l>(_env: JNIEnv<'l>, _class: JClass<'l>, threads: jni::sys::jint) {
+    WANTED_THREADS.store((threads.max(1) as usize).min(MAX_ENDGAME_THREADS), Ordering::Relaxed);
+    apply_threads();
 }
 
 /// Starts a table. Returns `{"handle": n}` or `{"error": "..."}`.
@@ -271,7 +297,9 @@ mod tests {
     fn scripted_game(h: i64, players: usize, check_rules: bool) -> Result<Value, String> {
         let wait = |what: &str| -> Result<Value, String> {
             let out = tables().lock().unwrap().get(&h).map(|t| Arc::clone(&t.out)).ok_or("gone")?;
-            let msg = out.pop(Duration::from_secs(60)).ok_or(format!("went quiet waiting for {what}"))?;
+            let msg = out.pop(Duration::from_secs(60)).ok_or_else(|| {
+                format!("went quiet waiting for {what} (closed: {})", out.closed.load(std::sync::atomic::Ordering::SeqCst))
+            })?;
             let (command, data) = msg.split_once(' ').unwrap_or((&msg, "null"));
             Ok(json!({"command": command, "data": serde_json::from_str::<Value>(data).unwrap_or(Value::Null)}))
         };
@@ -316,6 +344,7 @@ mod tests {
         };
 
         let mut value = 1;
+        let mut empty_clues = 0;
         let mut moves = 0;
         // If the human starts, that turn came in the action list, not as a live message.
         if me == 0 {
@@ -329,9 +358,16 @@ mod tests {
             let m = wait("the next message")?;
             match m["command"].as_str().unwrap() {
                 "warning" => {
-                    // That clue touched nothing: try the next rank.
+                    // That clue touched nothing: try the next rank, and when none touches anything (a hand of cards
+                    // that cannot be clued) play a card, which is always allowed.
                     value = value % 5 + 1;
-                    send(h, "action", json!({"tableID": 1, "type": 3, "target": other, "value": value}));
+                    empty_clues += 1;
+                    if empty_clues > 5 {
+                        empty_clues = 0;
+                        send(h, "action", json!({"tableID": 1, "type": 0, "target": mine[0], "value": 0}));
+                    } else {
+                        send(h, "action", json!({"tableID": 1, "type": 3, "target": other, "value": value}));
+                    }
                 }
                 "offlineRecord" => return Ok(m["data"].clone()),
                 "gameAction" => {
@@ -522,6 +558,74 @@ mod tests {
         assert!(start(VARIANTS, SUITS, wrong_size).is_err());
         let wrong_variant = r#"{"variant":"6 Suits","players":3,"convention":"HGroup1","seed":"p3v0s258","paceMs":0}"#;
         assert!(start(VARIANTS, SUITS, wrong_variant).is_err());
+    }
+
+    /// The variants the app offers offline (the same rule as the picker: the app can show them and the bots can play them).
+    fn offered_variants() -> Vec<String> {
+        let all: Vec<Value> = serde_json::from_str(VARIANTS).unwrap();
+        let suits: Vec<Value> = serde_json::from_str(SUITS).unwrap();
+        let known: Vec<&str> = suits.iter().map(|s| s["name"].as_str().unwrap()).collect();
+        let unusable: Vec<&str> =
+            suits.iter().filter(|s| s["prism"] == true || s["inverted"] == true).map(|s| s["name"].as_str().unwrap()).collect();
+        let bot_no = [
+            "Blind", "Mute", "Ambiguous", "Dual-Color", "Synesthesia", "Mix", "Funnels", "Chimneys", "Matryoshka",
+            "Alternating", "Odds", "Cow", "Duck", "Reversed", "Throw", "Up or Down", "Sudoku",
+        ];
+        all.iter()
+            .filter(|v| {
+                let plain = v.as_object().unwrap().keys().all(|k| ["id", "newID", "name", "suits"].contains(&k.as_str()));
+                let suits_ok = v["suits"].as_array().unwrap().iter().all(|s| {
+                    let s = s.as_str().unwrap();
+                    known.contains(&s) && !unusable.contains(&s)
+                });
+                plain && suits_ok && !bot_no.iter().any(|b| v["name"].as_str().unwrap().contains(b))
+            })
+            .map(|v| v["name"].as_str().unwrap().to_string())
+            .collect()
+    }
+
+    /// Every offered variant at 2 and 3 players with a few seeds, printing each failure and (above it) the panic that
+    /// caused it. Quick enough to run often; `SWEEP_SEEDS` sets how many seeds (default 2). Run with `--ignored --nocapture`.
+    #[test]
+    #[ignore]
+    fn sweep_small_tables() {
+        let seeds: u64 = std::env::var("SWEEP_SEEDS").ok().and_then(|v| v.parse().ok()).unwrap_or(2);
+        let from: usize = std::env::var("SWEEP_FROM").ok().and_then(|v| v.parse().ok()).unwrap_or(0);
+        let mut failures = Vec::new();
+        for (n, name) in offered_variants().iter().enumerate().skip(from) {
+            for players in [2usize, 3] {
+                for seed in 1..=seeds {
+                    let started = std::time::Instant::now();
+                    let result = play_scripted(name, players, seed, false);
+                    eprintln!(
+                        "{n:>3} {name} ({players}p, seed {seed}): {} in {:.1}s {}",
+                        if result.is_ok() { "ok" } else { "FAILED" },
+                        started.elapsed().as_secs_f32(),
+                        result.as_ref().err().map_or(String::new(), |e| format!("-- {e}")),
+                    );
+                    if let Err(e) = result {
+                        failures.push(format!("{name} ({players}p, seed {seed}): {e}"));
+                    }
+                }
+            }
+        }
+        eprintln!("SWEEP DONE: {} failures", failures.len());
+        for f in &failures {
+            eprintln!("FAILED {f}");
+        }
+    }
+
+    /// Games one after the other in this process, named by `PROBE="variant|players|seed;variant|players|seed"`,
+    /// printing what went wrong. Run with `--ignored --nocapture`.
+    #[test]
+    #[ignore]
+    fn probe_games() {
+        let probe = std::env::var("PROBE").expect("set PROBE=\"variant|players|seed;...\"");
+        for game in probe.split(';') {
+            let parts: Vec<&str> = game.split('|').collect();
+            let result = play_scripted(parts[0], parts[1].parse().unwrap(), parts[2].parse().unwrap(), false);
+            eprintln!("PROBE RESULT {game}: {:?}", result.as_ref().map(|_| "ok"));
+        }
     }
 
     /// Every variant the app offers offline, with 2 to 4 players. Slow; run with `--ignored`.

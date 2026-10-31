@@ -63,9 +63,12 @@ impl Outbox {
 
     /// The next message, waiting up to `timeout`. `None` if there was none.
     pub fn pop(&self, timeout: Duration) -> Option<String> {
+        let deadline = Instant::now() + timeout;
         let mut q = self.queue.lock().unwrap();
-        if q.is_empty() {
-            q = self.ready.wait_timeout(q, timeout).unwrap().0;
+        // A wait can end early without a message (a spurious wake-up); only the deadline or a close ends it for good.
+        while q.is_empty() && !self.closed.load(Ordering::SeqCst) {
+            let Some(left) = deadline.checked_duration_since(Instant::now()) else { break };
+            q = self.ready.wait_timeout(q, left).unwrap().0;
         }
         q.pop_front()
     }

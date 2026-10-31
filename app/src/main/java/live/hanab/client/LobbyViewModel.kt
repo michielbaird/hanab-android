@@ -99,8 +99,15 @@ class LobbyViewModel(app: Application) : AndroidViewModel(app) {
 
     val savedUsername: String get() = creds.username
 
+    private val botPower = BotPower(app)
+
+    override fun onCleared() {
+        botPower.stop()
+    }
+
     init {
         Variants.load(app)
+        botPower.start()
         PipStore.init(app)
         AppSettings.load(app)
         BotStore.load(app)
