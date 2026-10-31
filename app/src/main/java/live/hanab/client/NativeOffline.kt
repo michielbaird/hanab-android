@@ -12,6 +12,9 @@ object NativeOffline {
         false
     }
 
+    /** How many threads the bot's endgame search may use from now on (1 to 4); fewer saves battery. */
+    external fun setThreads(threads: Int)
+
     /** Starts a table. Returns `{"handle": n}` or `{"error": "..."}`. */
     external fun start(variantsJson: String, suitsJson: String, configJson: String): String
 
