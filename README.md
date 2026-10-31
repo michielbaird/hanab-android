@@ -84,7 +84,7 @@ phone itself, with no account or connection. The bots are [hanab-bot-rs](https:/
 and a small one-table server in `native/offline` (Rust) deals the game and answers the app with the same messages
 hanab.live sends, so the game screen is the same. It is built for 64-bit ARM phones (every build) and for x86_64 emulators (debug builds only); on other devices the buttons are hidden.
 
-The library is not part of the normal Gradle build. Build it once (and after changing `native/offline`):
+Gradle builds the library as part of every build (the `buildNative` task), and skips it when nothing under `native/offline` has changed, so the app never ships a library older than its code. To build it by hand:
 
 ```powershell
 .\native\build.ps1      # Windows
@@ -95,8 +95,7 @@ The library is not part of the normal Gradle build. Build it once (and after cha
 ```
 
 It needs [rustup](https://rustup.rs) (the pinned Rust toolchain is fetched for you) and the Android NDK (Android Studio >
-SDK Manager > SDK Tools > NDK, r27 or newer). The results are copied to `app/src/main/jniLibs/` (phones) and `app/src/debug/jniLibs/` (emulators); neither is committed. The release
-scripts run it when `cargo` is installed.
+SDK Manager > SDK Tools > NDK, r27 or newer). The results are copied to `app/src/main/jniLibs/` (phones) and `app/src/debug/jniLibs/` (emulators); neither is committed. Without `cargo` installed Gradle skips the task (offline play is then unavailable), and `-PskipNative` skips it on purpose.
 
 ## Release build
 
