@@ -8,6 +8,7 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -80,6 +81,8 @@ fun FlightCard(g: GameState, flight: Flight, origin: Offset, onDone: () -> Unit)
     val m = flight.move
     val suitName = g.suits.getOrNull(m.suit)
 
+    // The face is drawn like the cards in the hands: hanab.live's card front, unless the simplified display is on.
+    val hanabFace = faceUp && suitName != null && !live.hanab.client.AppSettings.simplifiedCards
     Box(
         Modifier
             .offset { IntOffset((cx - origin.x - w / 2).roundToInt(), (cy - origin.y - h / 2).roundToInt()) }
@@ -89,18 +92,24 @@ fun FlightCard(g: GameState, flight: Flight, origin: Offset, onDone: () -> Unit)
                 scaleY = scale
                 alpha = 1f - exit
             }
-            .background(
-                if (faceUp && suitName != null) suitBrush(suitName) else androidx.compose.ui.graphics.SolidColor(Color(0xFF424242)),
-                RoundedCornerShape(8.dp),
+            .then(
+                if (hanabFace) Modifier else Modifier.background(
+                    if (faceUp && suitName != null) suitBrush(suitName) else androidx.compose.ui.graphics.SolidColor(Color(0xFF424242)),
+                    RoundedCornerShape(8.dp),
+                ),
             )
             .border(
                 BorderStroke(3.dp, if (m.failed) Color(0xFFFF5252) else Color.White),
-                RoundedCornerShape(8.dp),
+                RoundedCornerShape(if (hanabFace) 6.dp else 8.dp),
             ),
         contentAlignment = Alignment.Center,
     ) {
-        if (faceUp && suitName != null) Pip(suitName, 16.dp, Modifier.align(Alignment.TopCenter).offset(y = 4.dp))
-        OutlinedText(if (faceUp && m.rank > 0) "${m.rank}" else "?", 30.sp)
+        if (hanabFace) {
+            HanabCardFace(suitName, m.rank, false, Modifier.fillMaxSize())
+        } else {
+            if (faceUp && suitName != null) Pip(suitName, 16.dp, Modifier.align(Alignment.TopCenter).offset(y = 4.dp))
+            OutlinedText(if (faceUp && m.rank > 0) "${m.rank}" else "?", 30.sp)
+        }
     }
 }
 
