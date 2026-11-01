@@ -77,11 +77,13 @@ data class VariantRules(
     /** The colour clues on offer when the variant names them (Color Mute: none), else null for the colours of the suits. */
     val clueColorsOverride: List<String>? = null,
 ) {
-    /** Whether the bot library plays this variant: it knows none of the clue rules above (it would give clues that do not exist). */
+    /**
+     * Whether the bot library plays this variant. It reads which ranks Pink-, Brown- and Deceptive-Ones touch (and never gave
+     * a rank clue the variant lacks in 198 test games), but not Odds and Evens, Funnels, Chimneys, Synesthesia or the clue restrictions.
+     */
     val botCanPlay: Boolean
-        get() = clueRanks == listOf(1, 2, 3, 4, 5) && !rankTouchedByAllRanks && !rankTouchedByNoRanks && !rankDeceptive &&
-            !oddsAndEvens && !funnels && !chimneys && !synesthesia && !colorCluesTouchNothing && !rankCluesTouchNothing &&
-            !alternatingClues && clueColorsOverride == null
+        get() = clueRanks.isNotEmpty() && !oddsAndEvens && !funnels && !chimneys && !synesthesia &&
+            !colorCluesTouchNothing && !rankCluesTouchNothing && !alternatingClues && clueColorsOverride == null
 }
 
 /** Suits and variants from the bundled copies of hanab.live's suits.json and variants.json. */
@@ -234,12 +236,17 @@ object Variants {
      */
     private val botUnsupported = listOf(
         "Blind", "Mute", "Ambiguous", "Dual-Color", "Synesthesia", "Mix", "Funnels", "Chimneys", "Matryoshka",
-        "Alternating", "Odds", "Cow", "Duck", "Reversed", "Throw", "Up or Down", "Sudoku", "Orange",
+        "Alternating", "Odds", "Cow", "Duck", "Reversed", "Throw", "Up or Down", "Sudoku",
     )
 
     /** What we can both show and the bots can play: the variants offered for offline games. */
     fun botSupported(): List<String> =
         supportedNames.filter { n -> botUnsupported.none { n.contains(it) } && rules(n).botCanPlay }
+
+    /** Whether the bot can go through a game of [variant] (the same variants it can play). */
+    fun canAnalyze(variant: String): Boolean = variant in botSupportedSet
+
+    private val botSupportedSet: Set<String> by lazy { botSupported().toSet() }
 
     /**
      * The variants in [among] that match [query], best first. Case, hyphens, "&" and brackets do not matter and every

@@ -52,8 +52,11 @@ class VariantsTest {
         assertFalse("the bot does not play Synesthesia", "Synesthesia (5 Suits)" in Variants.botSupported())
     }
 
-    @Test fun theRankClueRulesAreModelledButTheBotDoesNotPlayThem() {
-        for (v in listOf("Pink-Ones (5 Suits)", "Brown-Fives (5 Suits)", "Deceptive-Ones (5 Suits)", "Odds and Evens (5 Suits)", "Funnels (5 Suits)", "Chimneys (5 Suits)")) {
+    @Test fun theRankClueRulesAreModelledAndTheBotPlaysOnlySomeOfThem() {
+        for (v in listOf("Pink-Ones (5 Suits)", "Brown-Fives (5 Suits)", "Deceptive-Ones (5 Suits)", "Omni-Ones (5 Suits)")) {
+            assertTrue("the bot plays $v", v in Variants.botSupported())
+        }
+        for (v in listOf("Odds and Evens (5 Suits)", "Funnels (5 Suits)", "Chimneys (5 Suits)")) {
             assertTrue("$v should be supported", Variants.isSupported(v))
             assertFalse("the bot should not be offered $v", v in Variants.botSupported())
         }
@@ -93,10 +96,19 @@ class VariantsTest {
         assertEquals(emptyList<String>(), Variants.rules("Color Mute (5 Suits)").clueColorsOverride)
         assertTrue(Variants.rules("Alternating Clues (5 Suits)").alternatingClues)
         assertTrue(Variants.isSupported("Alternating Clues & Orange (5 Suits)"))
-        assertFalse("the bot does not play Orange", "Orange (5 Suits)" in Variants.botSupported())
+        assertTrue("the bot plays Orange", "Orange (5 Suits)" in Variants.botSupported())
         assertTrue(Variants.info("Orange").inverted && Variants.info("Dark Orange").inverted)
         assertEquals("pips/orange.svg", Variants.pipFile("Orange"))
         assertEquals(2275,Variants.allSupported().size)
+    }
+
+    @Test fun onlyVariantsTheBotPlaysCanBeAnalysed() {
+        assertTrue(Variants.canAnalyze("No Variant"))
+        assertTrue(Variants.canAnalyze("Rainbow-Ones (5 Suits)"))
+        assertFalse(Variants.canAnalyze("Synesthesia (5 Suits)"))
+        assertFalse(Variants.canAnalyze("Color Blind (5 Suits)"))
+        assertFalse(Variants.canAnalyze("Not a real variant"))
+        assertTrue(Variants.allSupported().filter { Variants.canAnalyze(it) } == Variants.botSupported())
     }
 
     @Test fun searchFindsEveryVariantWhoseNameHasTheWords() {

@@ -1341,7 +1341,7 @@ private fun BinIcon(modifier: Modifier, color: Color = Color.Black) {
 @Composable
 private fun AnalyzeButton(g: GameState, ui: LobbyUiState, vm: LobbyViewModel) {
     val id = analysisGameId(ui)
-    if (id == null || !live.hanab.client.NativeOffline.available) return
+    if (id == null || !live.hanab.client.NativeOffline.available || !live.hanab.client.game.Variants.canAnalyze(g.variantName)) return
     val context = androidx.compose.ui.platform.LocalContext.current
     // A kept analysis opens straight away, so the button reads "Analysis" rather than "Analyze".
     val kept = remember(id, ui.analysis) { live.hanab.client.AnalysisStore.exists(context, !ui.offline, id) }
