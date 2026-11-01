@@ -591,7 +591,7 @@ mod tests {
         let suits: Vec<Value> = serde_json::from_str(SUITS).unwrap();
         let known: Vec<&str> = suits.iter().map(|s| s["name"].as_str().unwrap()).collect();
         let unusable: Vec<&str> =
-            suits.iter().filter(|s| s["prism"] == true || s["inverted"] == true).map(|s| s["name"].as_str().unwrap()).collect();
+            suits.iter().filter(|s| s["inverted"] == true).map(|s| s["name"].as_str().unwrap()).collect();
         let bot_no = [
             "Blind", "Mute", "Ambiguous", "Dual-Color", "Synesthesia", "Mix", "Funnels", "Chimneys", "Matryoshka",
             "Alternating", "Odds", "Cow", "Duck", "Reversed", "Throw", "Up or Down", "Sudoku",
@@ -631,6 +631,10 @@ mod tests {
         };
         for (n, name) in offered_variants().iter().enumerate().skip(from) {
             if special_only && !has_rules(name) {
+                continue;
+            }
+            // SWEEP_NAME=Prism plays only the variants with that in their name.
+            if std::env::var("SWEEP_NAME").is_ok_and(|w| !name.contains(&w)) {
                 continue;
             }
             // SWEEP_STEP=12 plays every 12th variant only (a sample for slow table sizes).
@@ -681,7 +685,7 @@ mod tests {
         let known: Vec<&str> = suits.iter().map(|s| s["name"].as_str().unwrap()).collect();
         let unusable: Vec<&str> = suits
             .iter()
-            .filter(|s| s["prism"] == true || s["inverted"] == true)
+            .filter(|s| s["inverted"] == true)
             .map(|s| s["name"].as_str().unwrap())
             .collect();
         let bot_no = [

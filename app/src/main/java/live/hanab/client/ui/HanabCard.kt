@@ -78,24 +78,26 @@ private fun roundedRadius() = CARD_W * 0.08f
 /**
  * A card front: [suit] and [rank] are what is known of the card (-1 for unknown). Known suit only gives a faint
  * large symbol, known rank only a white card with the number, and neither the grey blank card. [dull] fades a card
- * that is no longer needed.
+ * that is no longer needed. [wash] is the colour of a prism card (it depends on the rank), or null.
  */
 @Composable
-fun HanabCardFace(suit: String?, rank: Int, dull: Boolean, modifier: Modifier = Modifier) {
+fun HanabCardFace(suit: String?, rank: Int, dull: Boolean, modifier: Modifier = Modifier, wash: Color? = null) {
     val measurer = rememberTextMeasurer()
     val pips = PipSettings.enabled
     Canvas(modifier.graphicsLayer { alpha = if (dull) CARD_FADE else 1f; compositingStrategy = CompositingStrategy.Offscreen }) {
         // Fit the site's card shape inside the box (it is a little narrower), centred.
         val s = minOf(size.width / CARD_W, size.height / CARD_H)
         withTransform({ translate((size.width - CARD_W * s) / 2, (size.height - CARD_H * s) / 2); scale(s, s, pivot = Offset.Zero) }) {
-            drawCardFace(measurer, suit, rank, pips)
+            drawCardFace(measurer, suit, rank, pips, wash)
         }
         // Darken only where the card was drawn (its rounded shape and glow), not the table around it.
         drawRect(Color.Black.copy(alpha = 1f - TABLE_DARKEN), blendMode = BlendMode.SrcAtop)
     }
 }
 
-private fun DrawScope.drawCardFace(measurer: TextMeasurer, suit: String?, rank: Int, pips: Boolean) {
+
+
+private fun DrawScope.drawCardFace(measurer: TextMeasurer, suit: String?, rank: Int, pips: Boolean, wash: Color?) {
     val alpha = 1f
     val radius = CornerRadius(roundedRadius())
     val inset = 4f
@@ -112,7 +114,9 @@ private fun DrawScope.drawCardFace(measurer: TextMeasurer, suit: String?, rank: 
 
     val shown = suit ?: "Unknown"
     val fills = fillsOf(shown)
-    val tint = brushFor(fills, 0f, 0f, CARD_W, CARD_H)
+    // A prism card is washed with the colour of its rank; its symbols keep the suit's own grey.
+    val washFills = if (wash != null) listOf(wash) else fills
+    val tint = brushFor(washFills, 0f, 0f, CARD_W, CARD_H)
     // The two-colour corner triangles of suits that more than one colour clue touches go under the tint.
     val clueColors = Variants.info(shown).colors
     if (suit != null && clueColors.size > 1 && !Variants.info(shown).allColors) drawDualColorTriangles(clueColors)
@@ -120,7 +124,7 @@ private fun DrawScope.drawCardFace(measurer: TextMeasurer, suit: String?, rank: 
     drawRoundRect(tint, Offset(inset, inset), inner, radius, alpha = 0.3f * alpha)
     drawRoundRect(tint, Offset(inset, inset), inner, radius, alpha = 0.7f * alpha, style = Stroke(8f))
 
-    val numberBrush = brushFor(fills, 0f, 14f, 0f, 110f)
+    val numberBrush = brushFor(washFills, 0f, 14f, 0f, 110f)
     if (rank in 1..5) {
         drawRank(measurer, rank.toString(), numberBrush, alpha)
         withTransform({ translate(CARD_W, CARD_H); rotate(180f, Offset.Zero) }) {

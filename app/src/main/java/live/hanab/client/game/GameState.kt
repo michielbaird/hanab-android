@@ -206,18 +206,28 @@ data class GameState(
         suits.indices.flatMap { s -> (1..5).map { r -> s to r } }.toSet()
     }
 
-    /** Does a colour clue (index into [clueColors]) touch a card of this suit and rank? */
+    /**
+     * Does a colour clue (index into [clueColors]) touch a card of this suit and rank? The same order of rules as the
+     * website's isCardTouchedByClueColor.
+     */
     fun touchesColor(suit: Int, rank: Int, colorIdx: Int): Boolean {
         val info = suitInfos.getOrNull(suit) ?: return false
         if (info.allColors) return true
         if (info.noColors) return false
+        // Synesthesia: also touched by the colour that goes with the rank.
+        if (rules.synesthesia && !info.noRanks && colorIdx == prismIndex(rank)) return true
         // Rainbow-Ones and White-Ones: the special rank is touched by every colour, or by none.
         if (rank == rules.specialRank) {
             if (rules.rankTouchedByAllColors) return true
             if (rules.rankTouchedByNoColors) return false
         }
+        // Prism: touched by the colour that goes with the rank.
+        if (info.prism) return colorIdx == prismIndex(rank)
         return clueColors.getOrNull(colorIdx) in info.colors
     }
+
+    /** The clue colour that goes with a rank in Prism and Synesthesia: the first colour for a 1, then in turn and round. */
+    fun prismIndex(rank: Int): Int = if (clueColors.isEmpty()) -1 else (rank - 1) % clueColors.size
 
     /**
      * Does a rank clue ([clueRank] is the value sent: the rank, or 1 / 2 for odds / evens) touch a card of this suit

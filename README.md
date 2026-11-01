@@ -33,12 +33,12 @@ lobby and the same games as everyone on the website.
   Everything can be switched off or tuned in Settings.
 
 **Variants**
-1,699 of the website's 2,426 variants: plain suits, Rainbow, Pink, Brown, White, Black and the other simple
+1,949 of the website's 2,426 variants: plain suits, Rainbow, Pink, Brown, White, Black, Prism and the other simple
 suits, and the variants whose special rules are about what clues touch (Rainbow-Ones, Pink-Ones, Brown-Ones,
-Deceptive-Ones, Odds and Evens, Funnels, Chimneys, Scarce Ones, Critical Fours, Clue Starved). The rest (Prism and
-Orange suits, reversed suits, Up or Down, Throw It in a Hole, Sudoku, Alternating Clues, blind and mute variants,
+Deceptive-Ones, Odds and Evens, Funnels, Chimneys, Synesthesia, Scarce Ones, Critical Fours, Clue Starved). The rest
+(Orange suits, reversed suits, Up or Down, Throw It in a Hole, Sudoku, Alternating Clues, blind and mute variants,
 Cow & Pig, Duck) are not supported yet and are not offered when creating a table. Offline play, which the bots
-play, has fewer of them: 613.
+play, has fewer of them.
 
 **Bots**
 Built for hosting [scala-bot](https://github.com/will-hanabi-bot/scala-bot): mark a user as a bot in the
