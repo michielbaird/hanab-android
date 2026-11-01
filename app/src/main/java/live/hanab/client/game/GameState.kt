@@ -124,6 +124,8 @@ data class GameState(
     /** Each player's detrimental character (null = none), by player index. */
     val characters: List<CharacterInfo?> = emptyList(),
     val lastClue: ClueMark? = null,
+    /** Whether the last clue given in the game was a colour clue (null = none yet); Alternating Clues needs it. */
+    val lastClueWasColor: Boolean? = null,
     /** Everyone's notes by card order, as the server sends them to spectators and in replays. */
     val allNotes: Map<Int, List<NoteEntry>> = emptyMap(),
     /** True identities of every card (index = card order), sent once the game is a replay. */
@@ -199,8 +201,18 @@ data class GameState(
 
     /** Colours offered as colour clues, in the order the server numbers them (Rainbow adds none). */
     val clueColors: List<String> by lazy {
-        suitInfos.filter { !it.allColors }.flatMap { it.colors }.distinct()
+        rules.clueColorsOverride ?: suitInfos.filter { !it.allColors }.flatMap { it.colors }.distinct()
     }
+
+    /**
+     * May this kind of clue be given? Alternating Clues forbids the kind given last. [touchesSomething]: the clue
+     * touches a card; a clue that touches nothing is still allowed with the empty-clues option and for the kind of
+     * clue that touches nothing in Color Blind / Number Blind.
+     */
+    fun clueAllowed(isColor: Boolean, touchesSomething: Boolean): Boolean =
+        (!rules.alternatingClues || lastClueWasColor != isColor) &&
+            (touchesSomething || options.emptyClues ||
+                (if (isColor) rules.colorCluesTouchNothing else rules.rankCluesTouchNothing))
 
     private val allIdentities: Set<Pair<Int, Int>> by lazy {
         suits.indices.flatMap { s -> (1..5).map { r -> s to r } }.toSet()
@@ -211,6 +223,7 @@ data class GameState(
      * website's isCardTouchedByClueColor.
      */
     fun touchesColor(suit: Int, rank: Int, colorIdx: Int): Boolean {
+        if (rules.colorCluesTouchNothing) return false
         val info = suitInfos.getOrNull(suit) ?: return false
         if (info.allColors) return true
         if (info.noColors) return false
@@ -234,6 +247,7 @@ data class GameState(
      * and rank? The same order of rules as the website's isCardTouchedByClueRank.
      */
     fun touchesRank(suit: Int, rank: Int, clueRank: Int): Boolean {
+        if (rules.rankCluesTouchNothing) return false
         val info = suitInfos.getOrNull(suit) ?: return false
         if (info.allRanks) return true
         if (info.noRanks) return false
@@ -384,6 +398,7 @@ data class GameState(
                 val what = if (isColor) clueColors.getOrElse(value) { "?" } else rankClueLabel(value)
                 copy(
                     cards = newCards,
+                    lastClueWasColor = isColor,
                     // Card cycling: the giver's oldest unclued card moves to their newest slot.
                     hands = if (options.cardCycle) hands.mapIndexed { i, h -> if (i == giver) cycleChop(h, newCards) else h } else hands,
                     lastClue = ClueMark(

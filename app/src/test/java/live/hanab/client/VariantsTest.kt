@@ -82,6 +82,20 @@ class VariantsTest {
         assertEquals(Variants.rules("No Variant"), live.hanab.client.game.VariantRules())
     }
 
+    @Test fun blindMuteAndAlternatingVariantsAreModelled() {
+        for (v in listOf("Color Blind (5 Suits)", "Number Blind (3 Suits)", "Totally Blind (6 Suits)", "Color Mute (4 Suits)",
+            "Alternating Clues (5 Suits)", "Alternating Clues & Prism (5 Suits)")) {
+            assertTrue("$v should be offered", Variants.isSupported(v))
+            assertFalse("the bot does not play $v", v in Variants.botSupported())
+        }
+        assertTrue(Variants.rules("Color Blind (5 Suits)").colorCluesTouchNothing)
+        assertTrue(Variants.rules("Totally Blind (5 Suits)").let { it.colorCluesTouchNothing && it.rankCluesTouchNothing })
+        assertEquals(emptyList<String>(), Variants.rules("Color Mute (5 Suits)").clueColorsOverride)
+        assertTrue(Variants.rules("Alternating Clues (5 Suits)").alternatingClues)
+        assertFalse("Orange suits are not modelled yet", Variants.isSupported("Alternating Clues & Orange (5 Suits)"))
+        assertEquals(2025, Variants.allSupported().size)
+    }
+
     @Test fun searchFindsEveryVariantWhoseNameHasTheWords() {
         val all = Variants.allSupported()
         // "Rainbow" used to show only the first few matches, and never Rainbow-Ones.

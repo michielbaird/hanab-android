@@ -741,7 +741,8 @@ private fun CluePanel(
         }
     }
     // A clue is valid if we have a clue token and it touches at least one card.
-    val valid = g.canClue && choice?.let { g.options.emptyClues || touches(it) } == true
+    fun allowed(c: ClueChoice) = g.clueAllowed(c is ClueChoice.Color, touches(c))
+    val valid = g.canClue && choice?.let { allowed(it) } == true
 
     Surface(tonalElevation = 3.dp, shadowElevation = 6.dp) {
         Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -767,7 +768,7 @@ private fun CluePanel(
                                     PartnerChip(name = labels[k], selected = partner == p, fontSize = fontSize, modifier = Modifier.weight(1f)) {
                                         onPartner(p)
                                         // Keep the chosen clue if it is still valid for the new partner.
-                                        if (choice != null && !(g.options.emptyClues || touchesIn(p, choice))) onChoice(null)
+                                        if (choice != null && !g.clueAllowed(choice is ClueChoice.Color, touchesIn(p, choice))) onChoice(null)
                                     }
                                 }
                                 // A short last row keeps the same chip width as the full ones.
@@ -788,7 +789,7 @@ private fun CluePanel(
                         pip = name,
                         color = suitColor(name),
                         selected = choice == option,
-                        enabled = g.canClue && (g.options.emptyClues || touches(option)),
+                        enabled = g.canClue && allowed(option),
                     ) { onChoice(option) }
                 }
             }
@@ -800,7 +801,7 @@ private fun CluePanel(
                         label = g.rankClueLabel(r),
                         color = Color(0xFF455A64),
                         selected = choice == option,
-                        enabled = g.canClue && (g.options.emptyClues || touches(option)),
+                        enabled = g.canClue && allowed(option),
                     ) { onChoice(option) }
                 }
             }

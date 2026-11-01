@@ -367,4 +367,34 @@ class GameStateTest {
         assert(g.touchesColor(1, 3, 0) && g.touchesColor(1, 3, 1))      // yellow 3: its own yellow and the 3's red
         assert(g.touchesColor(0, 3, 0) && !g.touchesColor(0, 3, 1))     // red 3: red twice over, never yellow
     }
+
+    @Test fun blindVariantsTouchNothingButAllowTheClue() {
+        val color = twoSuits(live.hanab.client.game.VariantRules(colorCluesTouchNothing = true), "Color Blind (2 Suits)")
+        assert(!color.touchesColor(0, 1, 0) && color.touchesRank(0, 1, 1))
+        assert(color.clueAllowed(isColor = true, touchesSomething = false))     // a colour clue may touch nothing
+        assert(!color.clueAllowed(isColor = false, touchesSomething = false))   // a rank clue may not
+        val number = twoSuits(live.hanab.client.game.VariantRules(rankCluesTouchNothing = true), "Number Blind (2 Suits)")
+        assert(!number.touchesRank(0, 1, 1) && number.touchesColor(0, 1, 0))
+        assert(number.clueAllowed(isColor = false, touchesSomething = false))
+        assert(!number.clueAllowed(isColor = true, touchesSomething = false))
+    }
+
+    @Test fun alternatingCluesForbidTheSameKindTwiceInARow() {
+        val g = twoSuits(live.hanab.client.game.VariantRules(alternatingClues = true), "Alternating Clues (2 Suits)")
+        assert(g.clueAllowed(true, true) && g.clueAllowed(false, true))         // the first clue may be either
+        val afterColor = g.copy(lastClueWasColor = true)
+        assert(!afterColor.clueAllowed(true, true) && afterColor.clueAllowed(false, true))
+        val afterRank = g.copy(lastClueWasColor = false)
+        assert(afterRank.clueAllowed(true, true) && !afterRank.clueAllowed(false, true))
+        // It follows the clues actually given, whoever gave them.
+        val clue = j("""{"type":"clue","clue":{"type":0,"value":0},"giver":1,"target":0,"list":[],"turn":0}""")
+        assertEquals(true, g.apply(clue).lastClueWasColor)
+        // Without the rule nothing is forbidden.
+        assert(twoSuits(live.hanab.client.game.VariantRules(), "x").copy(lastClueWasColor = true).clueAllowed(true, true))
+    }
+
+    @Test fun colorMuteOffersNoColourClues() {
+        val g = twoSuits(live.hanab.client.game.VariantRules(clueColorsOverride = emptyList()), "Color Mute (2 Suits)")
+        assertEquals(emptyList<String>(), g.clueColors)
+    }
 }

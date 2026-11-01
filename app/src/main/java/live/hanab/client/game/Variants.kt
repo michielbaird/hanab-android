@@ -67,11 +67,19 @@ data class VariantRules(
     val chimneys: Boolean = false,
     /** Synesthesia: every card is also touched by the colour that goes with its rank, and there are no rank clues. */
     val synesthesia: Boolean = false,
+    /** Color Blind / Number Blind: that kind of clue can be given (even with an empty hand match) but touches nothing. */
+    val colorCluesTouchNothing: Boolean = false,
+    val rankCluesTouchNothing: Boolean = false,
+    /** Two clues in a row may not be of the same kind (colour, then rank, then colour...). */
+    val alternatingClues: Boolean = false,
+    /** The colour clues on offer when the variant names them (Color Mute: none), else null for the colours of the suits. */
+    val clueColorsOverride: List<String>? = null,
 ) {
-    /** Whether the bot library plays this variant: it knows none of the rank-clue rules above (it would give clues that do not exist). */
+    /** Whether the bot library plays this variant: it knows none of the clue rules above (it would give clues that do not exist). */
     val botCanPlay: Boolean
         get() = clueRanks == listOf(1, 2, 3, 4, 5) && !rankTouchedByAllRanks && !rankTouchedByNoRanks && !rankDeceptive &&
-            !oddsAndEvens && !funnels && !chimneys && !synesthesia
+            !oddsAndEvens && !funnels && !chimneys && !synesthesia && !colorCluesTouchNothing && !rankCluesTouchNothing &&
+            !alternatingClues && clueColorsOverride == null
 }
 
 /** Suits and variants from the bundled copies of hanab.live's suits.json and variants.json. */
@@ -89,7 +97,7 @@ object Variants {
     private val modelledKeys = plainKeys + setOf(
         "specialRank", "specialRankAllClueColors", "specialRankNoClueColors", "criticalRank", "scarceOnes", "clueStarved",
         "clueRanks", "specialRankAllClueRanks", "specialRankNoClueRanks", "specialRankDeceptive", "oddsAndEvens", "funnels", "chimneys",
-        "synesthesia",
+        "synesthesia", "colorCluesTouchNothing", "rankCluesTouchNothing", "alternatingClues", "clueColors",
     )
     private var rulesByVariant: Map<String, VariantRules> = emptyMap()
 
@@ -168,6 +176,10 @@ object Variants {
                     funnels = o.flag("funnels"),
                     chimneys = o.flag("chimneys"),
                     synesthesia = o.flag("synesthesia"),
+                    colorCluesTouchNothing = o.flag("colorCluesTouchNothing"),
+                    rankCluesTouchNothing = o.flag("rankCluesTouchNothing"),
+                    alternatingClues = o.flag("alternatingClues"),
+                    clueColorsOverride = (o["clueColors"] as? JsonArray)?.map { it.jsonPrimitive.content },
                 )
             }
         }
