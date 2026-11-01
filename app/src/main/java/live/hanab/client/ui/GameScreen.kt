@@ -914,20 +914,27 @@ private fun CardView(g: GameState, c: Card, known: Boolean, note: String? = null
         dead -> dullBrush(g.suits[knownSuit])
         else -> suitBrush(g.suits[knownSuit])
     }
-    val border = if (c.clued) BorderStroke(3.dp, Color.White) else BorderStroke(1.dp, Color(0xFF9E9E9E))
+    val simplified = AppSettings.simplifiedCards
+    val border = if (c.clued) BorderStroke(3.dp, Color.White) else if (simplified) BorderStroke(1.dp, Color(0xFF9E9E9E)) else null
+    val shape = RoundedCornerShape(if (simplified) 8.dp else 6.dp)
     Box(
         Modifier.width(56.dp).height(78.dp)
-            .background(bgBrush, RoundedCornerShape(8.dp)).border(border, RoundedCornerShape(8.dp)),
+            .then(if (simplified) Modifier.background(bgBrush, shape) else Modifier)
+            .then(if (border != null) Modifier.border(border, shape) else Modifier),
         contentAlignment = Alignment.Center,
     ) {
-        OutlinedText(
-            if (knownRank >= 0) "$knownRank" else "", 30.sp,
-            fill = if (dead) Color(0xFFBDBDBD) else Color.White,
-        )
+        if (simplified) {
+            OutlinedText(
+                if (knownRank >= 0) "$knownRank" else "", 30.sp,
+                fill = if (dead) Color(0xFFBDBDBD) else Color.White,
+            )
+        } else {
+            HanabCardFace(if (knownSuit >= 0) g.suits[knownSuit] else null, knownRank, dead, Modifier.fillMaxSize())
+        }
         if (!known && knownRank < 0 && c.possibleRanks.size < 5) {
             Text(
                 c.possibleRanks.sorted().joinToString(""),
-                fontSize = 11.sp, color = Color.White,
+                fontSize = 11.sp, color = if (simplified) Color.White else Color.Black,
                 modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 4.dp),
             )
         }
@@ -939,7 +946,7 @@ private fun CardView(g: GameState, c: Card, known: Boolean, note: String? = null
             )
         }
         OthersNotesBadge(others, Modifier.align(Alignment.BottomEnd))
-        if (knownSuit >= 0) Pip(g.suits[knownSuit], 16.dp, Modifier.align(Alignment.TopCenter).padding(top = 4.dp))
+        if (simplified && knownSuit >= 0) Pip(g.suits[knownSuit], 16.dp, Modifier.align(Alignment.TopCenter).padding(top = 4.dp))
         CardBadges(g.allCritical(realId), g.allDead(realId), Modifier.align(Alignment.BottomStart))
         if (known && g.isPlayable(c)) {
             Box(Modifier.align(Alignment.TopEnd).padding(4.dp).size(8.dp).background(Color.White, RoundedCornerShape(4.dp)))
