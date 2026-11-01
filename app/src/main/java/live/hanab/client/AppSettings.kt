@@ -37,6 +37,9 @@ object AppSettings {
     /** The faint fireworks picture behind every screen. */
     var backdrop by mutableStateOf(true); private set
 
+    /** Cards drawn with the app's own flat style (the default is hanab.live's card fronts). */
+    var simplifiedCards by mutableStateOf(false); private set
+
     /** The last table password typed when creating or joining a table (people usually reuse one). */
     var lastPassword by mutableStateOf(""); private set
 
@@ -52,6 +55,7 @@ object AppSettings {
         keepAwake = prefs.getBoolean("keepAwake", true)
         backdrop = prefs.getBoolean("backdrop", true)
         autoClue = prefs.getBoolean("autoClue", false)
+        simplifiedCards = prefs.getBoolean("simplifiedCards", false)
         showUnsupported = prefs.getBoolean("showUnsupported", false)
         lastPassword = prefs.getString("lastPassword", "") ?: ""
     }
@@ -72,6 +76,7 @@ object AppSettings {
     fun changeShowUnsupported(v: Boolean) { showUnsupported = v; prefs.edit().putBoolean("showUnsupported", v).apply() }
     fun changeAutoClue(v: Boolean) { autoClue = v; prefs.edit().putBoolean("autoClue", v).apply() }
     fun changeBackdrop(v: Boolean) { backdrop = v; prefs.edit().putBoolean("backdrop", v).apply() }
+    fun changeSimplifiedCards(v: Boolean) { simplifiedCards = v; prefs.edit().putBoolean("simplifiedCards", v).apply() }
     fun changeKeepAwake(v: Boolean) { keepAwake = v; prefs.edit().putBoolean("keepAwake", v).apply() }
 
     private inline fun <reified E : Enum<E>> enumOf(key: String, default: E): E =

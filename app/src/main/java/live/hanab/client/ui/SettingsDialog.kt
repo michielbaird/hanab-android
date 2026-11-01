@@ -35,6 +35,7 @@ fun SettingsDialog(onDismiss: () -> Unit) {
             Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 SwitchRow("Open clue panel on my turn", AppSettings.autoClue, AppSettings::changeAutoClue)
                 SwitchRow("Fireworks background", AppSettings.backdrop, AppSettings::changeBackdrop)
+                SwitchRow("Use simplified card display", AppSettings.simplifiedCards, AppSettings::changeSimplifiedCards)
                 SwitchRow("Suit symbols", AppSettings.pips, AppSettings::changePips)
                 SwitchRow("Colour-blind colours", AppSettings.colorblind, AppSettings::changeColorblind)
                 SwitchRow("Vibration", AppSettings.haptics, AppSettings::changeHaptics)
