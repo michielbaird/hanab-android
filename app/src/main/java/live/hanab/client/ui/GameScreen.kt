@@ -1299,17 +1299,19 @@ private fun androidx.compose.foundation.layout.BoxScope.ClueBubbleFor(g: GameSta
                 }
             }
             .background(
-                if (mark.color != null) suitBrush(mark.color) else androidx.compose.ui.graphics.SolidColor(Color(0xFF455A64)),
+                if (mark.color != null && mark.sound == null) suitBrush(mark.color) else androidx.compose.ui.graphics.SolidColor(Color(0xFF455A64)),
                 shape,
             )
             .border(2.dp, Color.White, shape),
         contentAlignment = Alignment.Center,
     ) {
-        if (mark.rank != null) {
+        if (mark.sound != null) {
+            Text(mark.sound, fontSize = 7.sp, fontWeight = FontWeight.ExtraBold, color = Color.White, maxLines = 1)
+        } else if (mark.rank != null) {
             val label = mark.rankLabel ?: "${mark.rank}"
             Text(label, fontSize = if (label.length > 1) 9.sp else 14.sp, fontWeight = FontWeight.ExtraBold, color = Color.White)
         }
-        if (mark.color != null) Pip(mark.color, 14.dp)
+        if (mark.color != null && mark.sound == null) Pip(mark.color, 14.dp)
     }
 }/** A small black waste bin, drawn directly so its colour is not decided by the emoji font. */
 @Composable
@@ -1507,8 +1509,8 @@ private fun GameHeader(
                     repeat(3) { i ->
                         Box(
                             Modifier.size(14.dp)
-                                .background(if (i < g.strikes) Color(0xFFD32F2F) else Color.Transparent, RoundedCornerShape(3.dp))
-                                .border(1.5.dp, if (i < g.strikes) Color(0xFFD32F2F) else Color(0xFF9E9E9E), RoundedCornerShape(3.dp)),
+                                .background(if (i < g.strikes && !g.hidesScore) Color(0xFFD32F2F) else Color.Transparent, RoundedCornerShape(3.dp))
+                                .border(1.5.dp, if (i < g.strikes && !g.hidesScore) Color(0xFFD32F2F) else Color(0xFF9E9E9E), RoundedCornerShape(3.dp)),
                         )
                     }
                 }
@@ -1522,7 +1524,11 @@ private fun GameHeader(
                         .clickable(enabled = deckPlayable, onClick = onDeckPlay),
                     contentAlignment = Alignment.Center,
                 ) { Text("${g.deckSize}", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color.White) }
-                Text("${g.finalScore}/${g.scoreDenominator}", fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                // Throw It in a Hole: how many cards went in the hole, not the score.
+                Text(
+                    if (g.hidesScore) "${g.hole.size} in hole" else "${g.finalScore}/${g.scoreDenominator}",
+                    fontSize = if (g.hidesScore) 11.sp else 14.sp, fontWeight = FontWeight.Bold,
+                )
                 // discard pile: a bin with the count
                 OutlinedButton(
                     onClick = onDiscards,
