@@ -35,6 +35,23 @@ data class SuitInfo(
     val fillsColorblind: List<Int> = emptyList(),
 )
 
+/**
+ * The rules a variant adds on top of its suits, from hanab.live's variants.json (the ones we model).
+ *  specialRank / rankTouchedByAllColors / rankTouchedByNoColors   Rainbow-Ones, White-Ones: cards of that rank are
+ *                                                                 touched by every colour clue, or by none
+ *  criticalRank   every card of that rank has a single copy (Critical Four)
+ *  scarceOnes     two copies of each one instead of three
+ *  clueStarved    discards give half a clue; the server counts clues at twice their value (a clue costs 2, up to 16)
+ */
+data class VariantRules(
+    val specialRank: Int? = null,
+    val rankTouchedByAllColors: Boolean = false,
+    val rankTouchedByNoColors: Boolean = false,
+    val criticalRank: Int? = null,
+    val scarceOnes: Boolean = false,
+    val clueStarved: Boolean = false,
+)
+
 /** Suits and variants from the bundled copies of hanab.live's suits.json and variants.json. */
 object Variants {
     private var suitInfos: Map<String, SuitInfo> = emptyMap()
@@ -45,8 +62,12 @@ object Variants {
     /** Suits we cannot model yet (changed copy counts, inverted stacks, rank-dependent colours). */
     private val unsupportedSuits = mutableSetOf<String>()
 
-    /** Variant keys that are pure metadata; any other key is a special rule we do not implement. */
+    /** Variant keys that are pure metadata, and the special rules we model; any other key is a rule we do not implement. */
     private val plainKeys = setOf("id", "newID", "name", "suits")
+    private val modelledKeys = plainKeys + setOf(
+        "specialRank", "specialRankAllClueColors", "specialRankNoClueColors", "criticalRank", "scarceOnes", "clueStarved",
+    )
+    private var rulesByVariant: Map<String, VariantRules> = emptyMap()
 
     fun load(context: Context) {
         if (suitInfos.isNotEmpty()) return
@@ -95,6 +116,7 @@ object Variants {
         suitInfos = infos
 
         val byName = mutableMapOf<String, List<String>>()
+        val rules = mutableMapOf<String, VariantRules>()
         val byId = mutableMapOf<Int, String>()
         val ok = mutableListOf<String>()
         for (el in Json.parseToJsonElement(variantsText).jsonArray) {
@@ -103,9 +125,20 @@ object Variants {
             val suits = (o["suits"] as? JsonArray)?.map { it.jsonPrimitive.content } ?: continue
             byName[name] = suits
             (o["id"] as? JsonPrimitive)?.content?.toIntOrNull()?.let { byId[it] = name }
-            if (o.keys.all { it in plainKeys } && suits.all { it in infos && it !in unsupportedSuits }) ok += name
+            if (o.keys.all { it in modelledKeys } && suits.all { it in infos && it !in unsupportedSuits }) {
+                ok += name
+                rules[name] = VariantRules(
+                    specialRank = (o["specialRank"] as? JsonPrimitive)?.content?.toIntOrNull(),
+                    rankTouchedByAllColors = o.flag("specialRankAllClueColors"),
+                    rankTouchedByNoColors = o.flag("specialRankNoClueColors"),
+                    criticalRank = (o["criticalRank"] as? JsonPrimitive)?.content?.toIntOrNull(),
+                    scarceOnes = o.flag("scarceOnes"),
+                    clueStarved = o.flag("clueStarved"),
+                )
+            }
         }
         suitsByVariant = byName
+        rulesByVariant = rules
         namesById = byId
         supportedNames = ok
     }
@@ -142,6 +175,9 @@ object Variants {
     }
 
     fun isSupported(variant: String) = variant in supportedNames
+
+    /** The special rules of [variant] (none for a plain one). */
+    fun rules(variant: String): VariantRules = rulesByVariant[variant] ?: VariantRules()
 
     /**
      * Names hanab-bot-rs says it cannot play (it warns "may crash or behave nonsensically"): a variant whose name

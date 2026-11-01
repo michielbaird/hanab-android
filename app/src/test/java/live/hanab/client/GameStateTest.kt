@@ -102,8 +102,8 @@ class GameStateTest {
             variantName = "Rainbow (3 Suits)", suits = infos.map { it.name }, suitInfos = infos,
         )
         assertEquals(listOf("Red", "Yellow"), g.clueColors)        // Rainbow adds no colour of its own
-        assert(g.touchesColor(2, 0) && g.touchesColor(2, 1))       // Rainbow: touched by red and yellow
-        assert(g.touchesColor(0, 0) && !g.touchesColor(0, 1))
+        assert(g.touchesColor(2, 3, 0) && g.touchesColor(2, 3, 1))    // Rainbow: touched by red and yellow
+        assert(g.touchesColor(0, 3, 0) && !g.touchesColor(0, 3, 1))
         // Our card 0 is touched by a red clue: it is Red or Rainbow, never Yellow.
         g = g.apply(j("""{"type":"draw","playerIndex":0,"order":0,"suitIndex":-1,"rank":-1}"""))
         g = g.apply(j("""{"type":"draw","playerIndex":0,"order":1,"suitIndex":-1,"rank":-1}"""))
@@ -291,4 +291,47 @@ class GameStateTest {
         assertEquals(false, miss.play); assertEquals(true, miss.failed); assertEquals(0, miss.order)
         assertEquals(emptyList<Any>(), g.movesBetweenStops(0, 2))           // a jump
         assertEquals(emptyList<Any>(), g.movesBetweenStops(2, 1))           // going back
-    }}
+    }
+    private fun twoSuits(rules: live.hanab.client.game.VariantRules, name: String) = GameState(
+        tableID = 1, playerNames = listOf("me", "bob"), ourIndex = 0, spectating = false,
+        variantName = name, suits = listOf("Red", "Yellow"),
+        suitInfos = listOf(live.hanab.client.game.SuitInfo("Red"), live.hanab.client.game.SuitInfo("Yellow")), rules = rules,
+    )
+
+    @Test fun rainbowOnesAreTouchedByEveryColour() {
+        val g = twoSuits(live.hanab.client.game.VariantRules(specialRank = 1, rankTouchedByAllColors = true), "Rainbow-Ones (2 Suits)")
+        assert(g.touchesColor(0, 1, 0) && g.touchesColor(0, 1, 1))      // a red 1 is touched by red and by yellow
+        assert(g.touchesColor(0, 2, 0) && !g.touchesColor(0, 2, 1))     // other ranks as usual
+    }
+
+    @Test fun whiteOnesAreTouchedByNoColour() {
+        val g = twoSuits(live.hanab.client.game.VariantRules(specialRank = 1, rankTouchedByNoColors = true), "White-Ones (2 Suits)")
+        assert(!g.touchesColor(0, 1, 0) && !g.touchesColor(1, 1, 1))
+        assert(g.touchesColor(0, 2, 0))
+    }
+
+    @Test fun scarceOnesHaveTwoCopiesAndCriticalRanksOne() {
+        val scarce = twoSuits(live.hanab.client.game.VariantRules(scarceOnes = true), "Scarce Ones (2 Suits)")
+        assertEquals(2, scarce.copies(0, 1))
+        assertEquals(2, scarce.copies(0, 2))
+        assertEquals(18, scarce.deckSize)                               // 2 suits of (2 + 2 + 2 + 2 + 1)
+        val critical = twoSuits(live.hanab.client.game.VariantRules(criticalRank = 4), "Critical Four (2 Suits)")
+        assertEquals(1, critical.copies(0, 4))
+        assertEquals(3, critical.copies(0, 1))
+        assertEquals(18, critical.deckSize)                             // 2 suits of (3 + 2 + 2 + 1 + 1)
+        assert(critical.isCriticalIdentity(0, 4))
+    }
+
+    @Test fun clueStarvedCountsCluesAtTwiceTheirValue() {
+        val g = twoSuits(live.hanab.client.game.VariantRules(clueStarved = true), "Clue Starved (2 Suits)")
+        assertEquals(16, g.clues)
+        assertEquals(16, g.maxClues)
+        assertEquals("8", g.cluesShown)
+        val after = g.apply(j("""{"type":"status","clues":15,"score":0,"maxScore":10}"""))
+        assertEquals("7.5", after.cluesShown)
+        assert(after.canClue)
+        val one = g.apply(j("""{"type":"status","clues":1,"score":0,"maxScore":10}"""))
+        assert(!one.canClue)                                            // half a clue is not enough to give one
+        assert(g.copy(clues = 2).canClue)
+    }
+}

@@ -362,7 +362,7 @@ private fun GameBoard(live: GameState, vm: LobbyViewModel, ui: LobbyUiState) {
         g.hands[cluePartner].filter { o ->
             val card = g.cards[o] ?: return@filter false
             when (c) {
-                is ClueChoice.Color -> g.touchesColor(card.suit, c.color)
+                is ClueChoice.Color -> g.touchesColor(card.suit, card.rank, c.color)
                 is ClueChoice.Rank -> g.touchesRank(card.suit, card.rank, c.rank)
             }
         }.toSet()
@@ -665,7 +665,7 @@ private fun GameBoard(live: GameState, vm: LobbyViewModel, ui: LobbyUiState) {
                             else vm.discard(order)
                             selected = null
                         },
-                        enabled = g.ourTurn && g.clues < 8,
+                        enabled = g.ourTurn && g.clues < g.maxClues,
                         modifier = Modifier.weight(1f),
                         contentPadding = PaddingValues(horizontal = 8.dp),
                     ) { Text("Discard", maxLines = 1) }
@@ -703,7 +703,7 @@ private fun CluePanel(
     choice: ClueChoice?,
     onChoice: (ClueChoice?) -> Unit,
 ) {
-    if (g.clues == 0) {
+    if (!g.canClue) {
         Surface(tonalElevation = 3.dp, shadowElevation = 6.dp) {
             Text(
                 "You have no clues",
@@ -718,19 +718,19 @@ private fun CluePanel(
     val hand = g.hands[partner].mapNotNull { g.cards[it] }
     fun touches(c: ClueChoice) = hand.any { card ->
         when (c) {
-            is ClueChoice.Color -> g.touchesColor(card.suit, c.color)
+            is ClueChoice.Color -> g.touchesColor(card.suit, card.rank, c.color)
             is ClueChoice.Rank -> g.touchesRank(card.suit, card.rank, c.rank)
         }
     }
     // Does [c] touch anything in [p]'s hand? Used to carry a selected clue over to another partner.
     fun touchesIn(p: Int, c: ClueChoice) = g.hands[p].mapNotNull { g.cards[it] }.any { card ->
         when (c) {
-            is ClueChoice.Color -> g.touchesColor(card.suit, c.color)
+            is ClueChoice.Color -> g.touchesColor(card.suit, card.rank, c.color)
             is ClueChoice.Rank -> g.touchesRank(card.suit, card.rank, c.rank)
         }
     }
     // A clue is valid if we have a clue token and it touches at least one card.
-    val valid = g.clues > 0 && choice?.let { g.options.emptyClues || touches(it) } == true
+    val valid = g.canClue && choice?.let { g.options.emptyClues || touches(it) } == true
 
     Surface(tonalElevation = 3.dp, shadowElevation = 6.dp) {
         Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -777,7 +777,7 @@ private fun CluePanel(
                         pip = name,
                         color = suitColor(name),
                         selected = choice == option,
-                        enabled = g.clues > 0 && (g.options.emptyClues || touches(option)),
+                        enabled = g.canClue && (g.options.emptyClues || touches(option)),
                     ) { onChoice(option) }
                 }
             }
@@ -789,7 +789,7 @@ private fun CluePanel(
                         label = "$r",
                         color = Color(0xFF455A64),
                         selected = choice == option,
-                        enabled = g.clues > 0 && (g.options.emptyClues || touches(option)),
+                        enabled = g.canClue && (g.options.emptyClues || touches(option)),
                     ) { onChoice(option) }
                 }
             }
@@ -809,7 +809,7 @@ private fun CluePanel(
                     g.hands[partner].count { o ->
                         val card = g.cards[o]
                         card != null && when (c) {
-                            is ClueChoice.Color -> g.touchesColor(card.suit, c.color)
+                            is ClueChoice.Color -> g.touchesColor(card.suit, card.rank, c.color)
                             is ClueChoice.Rank -> g.touchesRank(card.suit, card.rank, c.rank)
                         }
                     }
@@ -820,7 +820,7 @@ private fun CluePanel(
                     null -> null
                 }
                 Text(
-                    if (what == null) "Give clue (${g.clues} left)"
+                    if (what == null) "Give clue (${g.cluesShown} left)"
                     else "Tell ${g.name(partner)}: $what ($touchedCount card${if (touchedCount == 1) "" else "s"})",
                 )
             }
@@ -1474,9 +1474,9 @@ private fun GameHeader(
             Row(Modifier.weight(1f), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                 // clues: a token with the number
                 Box(
-                    Modifier.size(24.dp).background(if (g.clues == 0) Color(0xFFD32F2F) else Color(0xFF1976D2), androidx.compose.foundation.shape.CircleShape),
+                    Modifier.size(24.dp).background(if (!g.canClue) Color(0xFFD32F2F) else Color(0xFF1976D2), androidx.compose.foundation.shape.CircleShape),
                     contentAlignment = Alignment.Center,
-                ) { Text("${g.clues}", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color.White) }
+                ) { Text(g.cluesShown, fontSize = if (g.cluesShown.length > 2) 10.sp else 13.sp, fontWeight = FontWeight.Bold, color = Color.White) }
                 // strikes: three boxes, filled when taken. Long-press opens the terminate / vote form.
                 val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
                 Row(

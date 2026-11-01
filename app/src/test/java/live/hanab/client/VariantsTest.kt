@@ -41,6 +41,21 @@ class VariantsTest {
         assertFalse(Variants.isSupported("Chimneys (5 Suits)"))
     }
 
+    @Test fun variantsWithTheRulesWeModelAreSupported() {
+        assertTrue(Variants.isSupported("Rainbow-Ones (5 Suits)"))
+        assertTrue(Variants.isSupported("White-Ones (5 Suits)"))
+        assertTrue(Variants.isSupported("Scarce Ones (5 Suits)"))
+        assertTrue(Variants.isSupported("Critical Fours (5 Suits)"))
+        assertTrue(Variants.isSupported("Clue Starved (5 Suits)"))
+        assertEquals(1, Variants.rules("Rainbow-Ones (5 Suits)").specialRank)
+        assertTrue(Variants.rules("Rainbow-Ones (5 Suits)").rankTouchedByAllColors)
+        assertTrue(Variants.rules("White-Ones (5 Suits)").rankTouchedByNoColors)
+        assertTrue(Variants.rules("Scarce Ones (5 Suits)").scarceOnes)
+        assertEquals(4, Variants.rules("Critical Fours (5 Suits)").criticalRank)
+        assertTrue(Variants.rules("Clue Starved (5 Suits)").clueStarved)
+        assertEquals(Variants.rules("No Variant"), live.hanab.client.game.VariantRules())
+    }
+
     @Test fun theSupportedListIsOnlyVariantsWhoseSuitsAreAllKnown() {
         val supported = Variants.allSupported()
         assertTrue("expected hundreds of supported variants, got ${supported.size}", supported.size > 300)
