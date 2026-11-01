@@ -37,8 +37,25 @@ class VariantsTest {
         // Anything with a Prism suit (cycling colours) or one of the special-rule keys is out.
         val prism = Variants.suits("Prism (5 Suits)") != null
         if (prism) assertFalse(Variants.isSupported("Prism (5 Suits)"))
-        assertFalse(Variants.isSupported("Funnels (5 Suits)"))
-        assertFalse(Variants.isSupported("Chimneys (5 Suits)"))
+        assertFalse(Variants.isSupported("Up or Down (5 Suits)"))
+        assertFalse(Variants.isSupported("Sudoku (5 Suits)"))
+        assertFalse(Variants.isSupported("Throw It in a Hole (5 Suits)"))
+        assertFalse(Variants.isSupported("Orange (5 Suits)"))
+    }
+
+    @Test fun theRankClueRulesAreModelledButTheBotDoesNotPlayThem() {
+        for (v in listOf("Pink-Ones (5 Suits)", "Brown-Fives (5 Suits)", "Deceptive-Ones (5 Suits)", "Odds and Evens (5 Suits)", "Funnels (5 Suits)", "Chimneys (5 Suits)")) {
+            assertTrue("$v should be supported", Variants.isSupported(v))
+            assertFalse("the bot should not be offered $v", v in Variants.botSupported())
+        }
+        assertEquals(listOf(2, 3, 4, 5), Variants.rules("Pink-Ones (5 Suits)").clueRanks)
+        assertEquals(listOf(1, 2), Variants.rules("Odds and Evens (5 Suits)").clueRanks)
+        assertTrue(Variants.rules("Funnels (5 Suits)").funnels)
+        assertTrue(Variants.rules("Chimneys (5 Suits)").chimneys)
+        assertTrue(Variants.rules("Pink-Ones (5 Suits)").rankTouchedByAllRanks)
+        assertTrue(Variants.rules("Brown-Fives (5 Suits)").rankTouchedByNoRanks)
+        assertTrue(Variants.rules("Deceptive-Ones (5 Suits)").rankDeceptive)
+        assertTrue("Rainbow-Ones is still played by the bot", "Rainbow-Ones (5 Suits)" in Variants.botSupported())
     }
 
     @Test fun variantsWithTheRulesWeModelAreSupported() {

@@ -47,6 +47,8 @@ data class ClueMark(
     val color: String?,
     /** Rank for a rank clue, else null. */
     val rank: Int?,
+    /** What to show for a rank clue: the rank, or "Odds" / "Evens". */
+    val rankLabel: String? = null,
     val giver: Int,
     val target: Int,
     /** Turn number when the clue was given; the bubble lasts through the next turn. */
@@ -217,13 +219,30 @@ data class GameState(
         return clueColors.getOrNull(colorIdx) in info.colors
     }
 
-    /** Does a rank clue touch a card of this suit and rank? */
+    /**
+     * Does a rank clue ([clueRank] is the value sent: the rank, or 1 / 2 for odds / evens) touch a card of this suit
+     * and rank? The same order of rules as the website's isCardTouchedByClueRank.
+     */
     fun touchesRank(suit: Int, rank: Int, clueRank: Int): Boolean {
         val info = suitInfos.getOrNull(suit) ?: return false
         if (info.allRanks) return true
         if (info.noRanks) return false
+        if (rules.funnels) return rank <= clueRank
+        if (rules.chimneys) return rank >= clueRank
+        if (rules.oddsAndEvens) return if (clueRank == 1) rank in listOf(1, 3, 5) else rank in listOf(2, 4)
+        if (rank == rules.specialRank) {
+            if (rules.rankTouchedByAllRanks) return true
+            if (rules.rankTouchedByNoRanks) return false
+            // Deceptive: the rank that touches the card depends on its suit.
+            if (rules.rankDeceptive) return clueRank == rules.clueRanks.getOrNull(suit % rules.clueRanks.size)
+        }
         return rank == clueRank
     }
+
+    /** How a rank clue is called: its rank, or "Odds" / "Evens". */
+    fun rankClueLabel(clueRank: Int): String =
+        if (rules.oddsAndEvens) (if (clueRank == 1) "Odds" else "Evens") else "$clueRank"
+
     val ourTurn get() = !readOnly && !spectating && phase == Phase.Playing && currentPlayer == ourIndex
     val handSize get() = if (numPlayers <= 3) 5 else 4
 
@@ -352,7 +371,7 @@ data class GameState(
                         c.copy(possible = kept.ifEmpty { c.possible }, clued = c.clued || hit, clueApplied = true)
                     }
                 }
-                val what = if (isColor) clueColors.getOrElse(value) { "?" } else "$value"
+                val what = if (isColor) clueColors.getOrElse(value) { "?" } else rankClueLabel(value)
                 copy(
                     cards = newCards,
                     // Card cycling: the giver's oldest unclued card moves to their newest slot.
@@ -361,6 +380,7 @@ data class GameState(
                         orders = touched,
                         color = if (isColor) clueColors.getOrNull(value) else null,
                         rank = if (isColor) null else value,
+                        rankLabel = if (isColor) null else rankClueLabel(value),
                         giver = giver, target = target, turn = turn,
                     ),
                 ).logged("${name(giver)} told ${name(target)} $what (${touched.size} card${if (touched.size == 1) "" else "s"})")
