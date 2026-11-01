@@ -56,6 +56,29 @@ class VariantsTest {
         assertEquals(Variants.rules("No Variant"), live.hanab.client.game.VariantRules())
     }
 
+    @Test fun searchFindsEveryVariantWhoseNameHasTheWords() {
+        val all = Variants.allSupported()
+        // "Rainbow" used to show only the first few matches, and never Rainbow-Ones.
+        val rainbow = Variants.search("Rainbow", all)
+        assertTrue(rainbow.contains("Rainbow-Ones (5 Suits)"))
+        assertTrue(rainbow.contains("Rainbow (5 Suits)"))
+        // Hyphens and case do not matter; every word must be there, and the name that starts with them is first.
+        val ones = Variants.search("rainbow ones 5", all)
+        assertEquals("Rainbow-Ones (5 Suits)", ones.first())
+        assertTrue(ones.all { it.lowercase().let { n -> n.contains("rainbow") && n.contains("ones") && n.contains("5") } })
+        assertTrue(Variants.search("clue starved", all).all { it.startsWith("Clue Starved") })
+        assertTrue(Variants.search("ones", all).contains("White-Ones (6 Suits)"))
+        assertEquals(all, Variants.search("  ", all))
+        assertTrue(Variants.search("no such variant zzz", all).isEmpty())
+    }
+
+    @Test fun searchPutsNamesThatStartWithTheQueryFirst() {
+        val result = Variants.search("rainbow", Variants.allSupported())
+        val firstOther = result.indexOfFirst { !it.lowercase().startsWith("rainbow") }
+        val lastStart = result.indexOfLast { it.lowercase().startsWith("rainbow") }
+        assertTrue("names starting with the query come first", firstOther == -1 || lastStart < firstOther)
+    }
+
     @Test fun theSupportedListIsOnlyVariantsWhoseSuitsAreAllKnown() {
         val supported = Variants.allSupported()
         assertTrue("expected hundreds of supported variants, got ${supported.size}", supported.size > 300)
