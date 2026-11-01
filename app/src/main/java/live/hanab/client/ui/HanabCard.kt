@@ -125,10 +125,11 @@ private fun DrawScope.drawCardFace(measurer: TextMeasurer, suit: String?, rank: 
     drawRoundRect(tint, Offset(inset, inset), inner, radius, alpha = 0.7f * alpha, style = Stroke(8f))
 
     val numberBrush = brushFor(washFills, 0f, 14f, 0f, 110f)
-    if (rank in 1..5) {
-        drawRank(measurer, rank.toString(), numberBrush, alpha)
+    if (rank in 1..5 || rank == live.hanab.client.game.START_RANK) {
+        val label = live.hanab.client.game.cardRankText(rank)
+        drawRank(measurer, label, numberBrush, alpha)
         withTransform({ translate(CARD_W, CARD_H); rotate(180f, Offset.Zero) }) {
-            drawRank(measurer, rank.toString(), numberBrush, alpha)
+            drawRank(measurer, label, numberBrush, alpha)
         }
     }
     if (suit != null && pips) drawSuitPips(suit, rank, fills, alpha)

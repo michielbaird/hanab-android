@@ -137,7 +137,7 @@ fun suitColor(name: String): Color {
 fun prismColor(g: live.hanab.client.game.GameState, suit: Int, rank: Int): Color? {
     val info = g.suitInfos.getOrNull(suit)?.takeIf { it.prism } ?: return null
     val i = g.prismIndex(rank)
-    if (rank !in 1..5 || i < 0) return null
+    if ((rank !in 1..5 && rank != live.hanab.client.game.START_RANK) || i < 0) return null
     return androidx.compose.ui.graphics.lerp(suitColor(g.clueColors[i]), if (info.oneOfEach) Color.Black else Color.White, 0.5f)
 }
 
@@ -298,8 +298,10 @@ private fun GameBoard(live: GameState, vm: LobbyViewModel, ui: LobbyUiState) {
     val holdBack = remember { mutableStateMapOf<Int, Int>() }
     // Live moves that arrive while looking at an earlier turn are not animated (the screen shows the past).
     val allMoves = moves.filter { reviewIdx == null } + reviewMoves
-    val pendingHold = allMoves.filter { it.play }.associate { it.suit to it.rank - 1 }
-    val shownStacks = g.stacks.mapIndexed { i, v -> holdBack[i] ?: pendingHold[i] ?: v }
+    // What was on a stack before the card that just landed on it: one rank down, except where stacks run either way.
+    fun before(m: live.hanab.client.game.MoveEvent) = if (g.directional) g.stackRanks.getOrNull(m.suit)?.let { if (it.size >= 2) it[it.size - 2] else 0 } ?: 0 else m.rank - 1
+    val pendingHold = allMoves.filter { it.play }.associate { it.suit to before(it) }
+    val shownStacks = g.stackTops.mapIndexed { i, v -> holdBack[i] ?: pendingHold[i] ?: v }
     LaunchedEffect(ui.draws) {
         if (ui.draws.isEmpty()) return@LaunchedEffect
         val batch = ui.draws
@@ -328,7 +330,7 @@ private fun GameBoard(live: GameState, vm: LobbyViewModel, ui: LobbyUiState) {
             if (AppSettings.animSpeed != AnimSpeed.Off && from != null && to != null) {
                 // In a finished game every card is public, so there is nothing to turn over.
                 flights += Flight(m, from, to, flip = m.player == g.ourIndex && !g.spectating && !g.revealAll)
-                if (m.play) holdBack[m.suit] = m.rank - 1
+                if (m.play) holdBack[m.suit] = before(m)
             }
         }
         if (moves.isNotEmpty()) vm.consumeMoves(moves.last().id)
@@ -897,7 +899,7 @@ private fun Stacks(g: GameState, shown: List<Int>, bounds: MutableMap<String, Re
                 contentAlignment = Alignment.Center,
             ) {
                 Pip(s, 16.dp, Modifier.align(Alignment.TopStart).padding(2.dp))
-                OutlinedText(if (shown[i] > 0) "${shown[i]}" else "", 22.sp)
+                OutlinedText(if (shown[i] > 0) live.hanab.client.game.cardRankText(shown[i]) else "", 22.sp)
             }
         }
     }
@@ -935,13 +937,13 @@ private fun CardView(g: GameState, c: Card, known: Boolean, note: String? = null
     ) {
         if (simplified) {
             OutlinedText(
-                if (knownRank >= 0) "$knownRank" else "", 30.sp,
+                if (knownRank >= 0) live.hanab.client.game.cardRankText(knownRank) else "", 30.sp,
                 fill = if (dead) Color(0xFFBDBDBD) else Color.White,
             )
         } else {
             HanabCardFace(if (knownSuit >= 0) g.suits[knownSuit] else null, knownRank, dead, Modifier.fillMaxSize(), wash = prism)
         }
-        if (!known && knownRank < 0 && c.possibleRanks.size < 5) {
+        if (!known && knownRank < 0 && c.possibleRanks.size < g.ranks.size) {
             Text(
                 c.possibleRanks.sorted().joinToString(""),
                 fontSize = 11.sp, color = if (simplified) Color.White else Color.Black,
@@ -994,10 +996,10 @@ private fun DiscardDialog(g: GameState, onDismiss: () -> Unit) {
                                 Box(
                                     Modifier.width(28.dp).height(34.dp).background(suitBrush(name), RoundedCornerShape(5.dp)),
                                     contentAlignment = Alignment.Center,
-                                ) { OutlinedText("$r", 16.sp) }
+                                ) { OutlinedText(live.hanab.client.game.cardRankText(r), 16.sp) }
                             }
                         } else {
-                            (1..5).forEach { r ->
+                            g.ranks.forEach { r ->
                                 val left = g.remaining(s, r)
                                 Column(
                                     Modifier.width(40.dp).height(48.dp)
@@ -1006,7 +1008,7 @@ private fun DiscardDialog(g: GameState, onDismiss: () -> Unit) {
                                     verticalArrangement = Arrangement.Center,
                                 ) {
                                     OutlinedText("$left", 18.sp)
-                                    OutlinedText("$r\u00B7${g.unseen(s, r).coerceAtLeast(0)}", 10.sp, fontWeight = FontWeight.Normal)
+                                    OutlinedText("${live.hanab.client.game.cardRankText(r)}\u00B7${g.unseen(s, r).coerceAtLeast(0)}", 10.sp, fontWeight = FontWeight.Normal)
                                 }
                             }
                         }
@@ -1043,7 +1045,7 @@ private fun NotesDialog(g: GameState, order: Int, me: String?, canEdit: Boolean,
     val others = g.allNotes[order].orEmpty().filter { it.text.isNotBlank() && !it.name.equals(me, ignoreCase = true) }
     val mine = g.notes[order].orEmpty()
     val card = g.cards[order]
-    val known = card != null && card.suit in g.suits.indices && card.rank in 1..5
+    val known = card != null && card.suit in g.suits.indices && card.rank in g.ranks
     val holder = g.hands.indexOfFirst { order in it }
     val where = when {
         holder >= 0 -> "${g.name(holder)}'s hand, slot ${g.hands[holder].indexOf(order) + 1}"
@@ -1062,11 +1064,11 @@ private fun NotesDialog(g: GameState, order: Int, me: String?, canEdit: Boolean,
                         contentAlignment = Alignment.Center,
                     ) {
                         Pip(suit, 14.dp, Modifier.align(Alignment.TopCenter).padding(top = 2.dp))
-                        OutlinedText("${card.rank}", 20.sp, Modifier.align(Alignment.BottomCenter))
+                        OutlinedText(live.hanab.client.game.cardRankText(card.rank), 20.sp, Modifier.align(Alignment.BottomCenter))
                     }
                 }
                 Column {
-                    Text(if (known && card != null) "${g.suits[card.suit]} ${card.rank}" else "Card", style = MaterialTheme.typography.titleMedium)
+                    Text(if (known && card != null) g.cardName(card.suit, card.rank) else "Card", style = MaterialTheme.typography.titleMedium)
                     Text(where, style = MaterialTheme.typography.bodySmall)
                 }
             }

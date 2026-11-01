@@ -35,7 +35,7 @@ class VariantsTest {
     @Test fun variantsWithSpecialRulesOrUnmodelledSuitsAreNot() {
         assertFalse(Variants.isSupported("Not a real variant"))
         // Anything with one of the rules we do not model is out.
-        assertFalse(Variants.isSupported("Up or Down (5 Suits)"))
+        assertTrue(Variants.isSupported("Up or Down (5 Suits)"))
         assertFalse(Variants.isSupported("Sudoku (5 Suits)"))
         assertTrue(Variants.isSupported("Throw It in a Hole (5 Suits)"))
         assertTrue(Variants.isSupported("Orange (5 Suits)"))
@@ -99,7 +99,7 @@ class VariantsTest {
         assertTrue("the bot plays Orange", "Orange (5 Suits)" in Variants.botSupported())
         assertTrue(Variants.info("Orange").inverted && Variants.info("Dark Orange").inverted)
         assertEquals("pips/orange.svg", Variants.pipFile("Orange"))
-        assertEquals(2327, Variants.allSupported().size)
+        assertEquals(2395, Variants.allSupported().size)
     }
 
     @Test fun cowAndPigDuckAndThrowItInAHoleAreModelled() {
@@ -110,6 +110,36 @@ class VariantsTest {
             assertTrue("$v should be offered", Variants.isSupported(v))
             assertFalse("the bot does not play $v", v in Variants.botSupported())
         }
+    }
+
+    @Test fun reversedSuitsAndUpOrDownAreModelled() {
+        for (v in listOf("Reversed (5 Suits)", "Rainbow Reversed (5 Suits)", "Orange Reversed (4 Suits)", "Up or Down (5 Suits)",
+            "Up or Down & Prism (6 Suits)")) {
+            assertTrue("$v should be offered", Variants.isSupported(v))
+            assertFalse("the bot does not play $v", v in Variants.botSupported())
+        }
+        val reversed = Variants.info("Purple Reversed")
+        assertTrue(reversed.reversed && reversed.base == "Purple" && reversed.colors == Variants.info("Purple").colors)
+        assertEquals("pips/purple.svg", Variants.pipFile("Purple Reversed"))
+        assertTrue(Variants.rules("Up or Down (5 Suits)").upOrDown)
+    }
+
+    @Test fun anAmbiguousSuitTakesTheFirstSymbolNobodyElseInTheVariantUses() {
+        // Tomato, Mahogany, Emerald, Olive, Berry and Navy have no symbol of their own.
+        assertEquals(
+            listOf("hanabiRed1", "hanabiYellow2", "hanabiGreen3", "hanabiBlue4", "hanabiWhite5", "hanabiAltWhite6"),
+            Variants.pipsOf("Ambiguous (6 Suits)").values.toList(),
+        )
+        Variants.useVariant("Ambiguous (6 Suits)")
+        assertEquals("pips/red.svg", Variants.pipFile("Tomato"))
+        assertEquals("pips/teal.svg", Variants.pipFile("Navy"))
+        // With a suit that has its own symbol first, the automatic ones start from the first free one.
+        val mixed = Variants.pipsOf("Ambiguous & Black (5 Suits)")
+        assertEquals(5, mixed.size)
+        assertEquals(mixed.values.toSet().size, mixed.size)              // no two suits share a symbol
+        assertTrue(mixed.values.none { it == "auto" })
+        Variants.useVariant("No Variant")
+        assertEquals("pips/red.svg", Variants.pipFile("Red"))
     }
 
     @Test fun onlyVariantsTheBotPlaysCanBeAnalysed() {

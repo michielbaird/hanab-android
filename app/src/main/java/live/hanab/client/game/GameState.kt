@@ -38,6 +38,12 @@ data class GameOptions(
 )
 
 /** One person's note on a card. Notes are per person: players and spectators each keep their own. */
+/** The rank of the START card of Up or Down variants. */
+const val START_RANK = 7
+
+/** How a card's rank is written: its number, or S for the START card. */
+fun cardRankText(rank: Int): String = if (rank == START_RANK) "S" else "$rank"
+
 data class NoteEntry(val name: String, val text: String, val isSpectator: Boolean)
 
 /** The most recent clue: which cards it touched and what was said. Shown as a bubble for one turn. */
@@ -104,6 +110,8 @@ data class GameState(
     val hands: List<List<Int>> = playerNames.map { emptyList() },
     /** Highest rank played per suit (0 = nothing played). */
     val stacks: List<Int> = suits.map { 0 },
+    /** The ranks played on each stack, in order (the stacks of Reversed and Up or Down variants run both ways). */
+    val stackRanks: List<List<Int>> = suits.map { emptyList() },
     val discards: List<Int> = emptyList(),
     /** Clues as the server counts them: at twice their value in a Clue Starved variant (see [clueCost]). */
     val clues: Int = if (rules.clueStarved) 16 else 8,
@@ -143,6 +151,11 @@ data class GameState(
     /** How long the whole game took, in milliseconds. */
     val durationMs: Long = 0L,
 ) {
+    init {
+        // The symbols of an Ambiguous suit depend on the variant it is played in (see Variants.pipsOf).
+        Variants.useVariant(variantName)
+    }
+
     val numPlayers get() = playerNames.size
 
     /**
@@ -219,8 +232,45 @@ data class GameState(
                 (if (isColor) rules.colorCluesTouchNothing else rules.rankCluesTouchNothing))
 
     private val allIdentities: Set<Pair<Int, Int>> by lazy {
-        suits.indices.flatMap { s -> (1..5).map { r -> s to r } }.toSet()
+        suits.indices.flatMap { s -> ranks.map { r -> s to r } }.toSet()
     }
+
+    /** The ranks a card can have: 1 to 5, and the START card in Up or Down. */
+    val ranks: List<Int> get() = if (rules.upOrDown) listOf(1, 2, 3, 4, 5, START_RANK) else listOf(1, 2, 3, 4, 5)
+
+    /** Whether any stack runs from 5 down, or either way (Reversed suits, Up or Down). */
+    val directional: Boolean by lazy { rules.upOrDown || suitInfos.any { it.reversed } }
+
+    /** The orders of rank the stack of suit [s] can still be played in (every full run that agrees with what is on it). */
+    private fun runs(s: Int): List<List<Int>> {
+        val played = stackRanks.getOrElse(s) { emptyList() }
+        val all = when {
+            rules.upOrDown -> listOf(
+                listOf(1, 2, 3, 4, 5), listOf(5, 4, 3, 2, 1), listOf(START_RANK, 2, 3, 4, 5), listOf(START_RANK, 4, 3, 2, 1),
+            )
+            suitInfos.getOrNull(s)?.reversed == true -> listOf(listOf(5, 4, 3, 2, 1))
+            else -> listOf(listOf(1, 2, 3, 4, 5))
+        }
+        return all.filter { it.take(played.size) == played }
+    }
+
+    /** The ranks that can be played on suit [s] right now: the next one up, or down, or any way a new stack can start. */
+    fun nextRanks(s: Int): List<Int> {
+        if (s !in stacks.indices) return emptyList()
+        if (!directional) return listOf(stacks[s] + 1)
+        val played = stackRanks[s].size
+        return runs(s).mapNotNull { it.getOrNull(played) }.distinct()
+    }
+
+    /** The rank on top of suit [s]'s stack (0 = empty). */
+    fun stackTop(s: Int): Int = if (directional) stackRanks.getOrNull(s)?.lastOrNull() ?: 0 else stacks.getOrElse(s) { 0 }
+
+    /** The rank on top of each stack, as shown. */
+    val stackTops: List<Int> get() = stacks.indices.map(::stackTop)
+
+    /** Whether a card of this suit and rank is already on the stack. */
+    private fun onStack(suit: Int, rank: Int): Boolean =
+        if (directional) rank in stackRanks[suit] else stacks[suit] >= rank
 
     /**
      * Does a colour clue (index into [clueColors]) touch a card of this suit and rank? The same order of rules as the
@@ -244,7 +294,8 @@ data class GameState(
     }
 
     /** The clue colour that goes with a rank in Prism and Synesthesia: the first colour for a 1, then in turn and round. */
-    fun prismIndex(rank: Int): Int = if (clueColors.isEmpty()) -1 else (rank - 1) % clueColors.size
+    fun prismIndex(rank: Int): Int =
+        if (clueColors.isEmpty()) -1 else if (rank == START_RANK) clueColors.size - 1 else (rank - 1) % clueColors.size
 
     /**
      * Does a rank clue ([clueRank] is the value sent: the rank, or 1 / 2 for odds / evens) touch a card of this suit
@@ -350,7 +401,7 @@ data class GameState(
 
     /** Copies of (suit, rank) not yet played or discarded. */
     fun remaining(suit: Int, rank: Int): Int =
-        copies(suit, rank) - (if (stacks[suit] >= rank) 1 else 0) - (discardCounts[suit to rank] ?: 0)
+        copies(suit, rank) - (if (onStack(suit, rank)) 1 else 0) - (discardCounts[suit to rank] ?: 0)
 
     /** Of those, how many are not visible to us in anyone's hand (so could be in the deck or our hand). */
     fun unseen(suit: Int, rank: Int): Int {
@@ -373,12 +424,15 @@ data class GameState(
             }
             "play" -> {
                 val p = int("playerIndex"); val o = int("order"); val s = int("suitIndex"); val r = int("rank")
-                val newStacks = if (s in stacks.indices) stacks.mapIndexed { i, v -> if (i == s) r else v } else stacks
+                val newRanks = if (s in stacks.indices && r > 0) stackRanks.mapIndexed { i, v -> if (i == s) v + r else v } else stackRanks
+                val newStacks = if (s !in stacks.indices) stacks
+                else stacks.mapIndexed { i, v -> if (i != s) v else if (directional) newRanks[s].size else r }
                 // Throw It in a Hole: the server hides what was played, and the card goes in the hole, not on a stack.
                 val hidden = rules.throwItInAHole && s < 0
                 removeFromHand(p, o).copy(
                     cards = cards.reveal(o, s, r),
                     stacks = newStacks,
+                    stackRanks = newRanks,
                     hole = if (hidden) hole + o else hole,
                 ).logged("${name(p)} played ${cardName(s, r)}")
             }
@@ -462,10 +516,10 @@ data class GameState(
 
     private fun logged(t: String) = copy(log = (log + LogLine(t)).takeLast(60))
     fun name(p: Int) = playerNames.getOrElse(p) { "?" }
-    fun cardName(s: Int, r: Int) = if (s < 0 || r < 0) "a card" else "${suits.getOrElse(s) { "?" }} $r"
+    fun cardName(s: Int, r: Int) = if (s < 0 || r < 0) "a card" else "${suits.getOrElse(s) { "?" }} ${if (r == START_RANK) "START" else r}"
 
     /** Playable-now check used for hints in the UI (an Orange card is not marked: it goes on its stack by being discarded). */
-    fun isPlayable(c: Card) = c.suit in stacks.indices && !invertedSuit(c.suit) && c.rank == stacks[c.suit] + 1
+    fun isPlayable(c: Card) = c.suit in stacks.indices && !invertedSuit(c.suit) && c.rank in nextRanks(c.suit)
 
     /** Orange: the server discards a card of this suit when it is played and plays it when it is discarded. */
     fun invertedSuit(suit: Int) = suitInfos.getOrNull(suit)?.inverted == true
@@ -482,7 +536,7 @@ data class GameState(
     fun discardWarning(ids: Set<Pair<Int, Int>>): String? {
         if (ids.isEmpty() || rules.throwItInAHole) return null
         if (ids.all { invertedSuit(it.first) }) {
-            return if (ids.any { (s, r) -> r == stacks[s] + 1 }) null
+            return if (ids.any { (s, r) -> r in nextRanks(s) }) null
             else cap("${describe(ids)} is an Orange card, so discarding it plays it, and it cannot be played right now. Discard it anyway?")
         }
         if (ids.any { invertedSuit(it.first) }) return null
@@ -502,7 +556,7 @@ data class GameState(
             else -> null
         }
         // An Orange card counts as playable: the website never warns about it.
-        if (ids.any { (s, r) -> invertedSuit(s) || (s in stacks.indices && r == stacks[s] + 1) }) return null
+        if (ids.any { (s, r) -> invertedSuit(s) || (s in stacks.indices && r in nextRanks(s)) }) return null
         return cap("${describe(ids)} cannot be played right now. Play it anyway?")
     }
 
@@ -526,10 +580,10 @@ data class GameState(
         }.toMap()
 
     /** True if at least one of [ids] could be played on its stack right now. */
-    fun anyPlayableNow(ids: Set<Pair<Int, Int>>) = ids.any { (s, r) -> s in stacks.indices && r == stacks[s] + 1 }
+    fun anyPlayableNow(ids: Set<Pair<Int, Int>>) = ids.any { (s, r) -> s in stacks.indices && r in nextRanks(s) }
 
     /** True if every one of [ids] is playable on its stack right now. */
-    fun allPlayableNow(ids: Set<Pair<Int, Int>>) = ids.isNotEmpty() && ids.all { (s, r) -> s in stacks.indices && r == stacks[s] + 1 }
+    fun allPlayableNow(ids: Set<Pair<Int, Int>>) = ids.isNotEmpty() && ids.all { (s, r) -> s in stacks.indices && r in nextRanks(s) }
 
     /** "Red 3", or "a card" if [ids] is not a single identity. */
     fun describe(ids: Set<Pair<Int, Int>>): String =
@@ -572,7 +626,17 @@ data class GameState(
      * that is still needed has been discarded (so the stack can never reach it).
      */
     fun isDeadIdentity(suit: Int, rank: Int): Boolean {
-        if (suit !in stacks.indices || rank !in 1..5) return false
+        if (suit !in stacks.indices || rank !in ranks) return false
+        if (directional) {
+            // Dead unless some run the stack can still follow reaches it without a rank that has no copies left in between.
+            if (rank in stackRanks[suit]) return true
+            val played = stackRanks[suit].size
+            return runs(suit).none { run ->
+                val rest = run.drop(played)
+                val at = rest.indexOf(rank)
+                at >= 0 && rest.take(at).none { r -> (discardCounts[suit to r] ?: 0) >= copies(suit, r) }
+            }
+        }
         if (rank <= stacks[suit]) return true
         return (stacks[suit] + 1 until rank).any { r -> (discardCounts[suit to r] ?: 0) >= copies(suit, r) }
     }
@@ -603,13 +667,18 @@ data class GameState(
          */
         fun copiesOf(suit: SuitInfo?, rank: Int, rules: VariantRules): Int = when {
             suit?.oneOfEach == true || rank == rules.criticalRank -> 1
+            rank == START_RANK -> if (rules.upOrDown) 1 else 0
+            rank == 1 && (rules.upOrDown || suit?.reversed == true) -> 1
             rank == 1 && rules.scarceOnes -> 2
+            rank == 5 && suit?.reversed == true -> 3
             else -> when (rank) { 1 -> 3; 5 -> 1; else -> 2 }
         }
 
         /** Cards in the whole deck. */
         fun deckCards(suitInfos: List<SuitInfo>, rules: VariantRules): Int =
-            suitInfos.sumOf { suit -> (1..5).sumOf { rank -> copiesOf(suit, rank, rules) } }
+            suitInfos.sumOf { suit ->
+                (if (rules.upOrDown) listOf(1, 2, 3, 4, 5, START_RANK) else listOf(1, 2, 3, 4, 5)).sumOf { rank -> copiesOf(suit, rank, rules) }
+            }
     }
 }
 
