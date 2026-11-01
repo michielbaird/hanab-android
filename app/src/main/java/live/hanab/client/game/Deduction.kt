@@ -21,11 +21,13 @@ package live.hanab.client.game
  */
 internal class Deduction(private val g: GameState) {
     private val numSuits = g.suits.size
-    private val numIds = numSuits * 5
+    /** Ranks per suit: 1 to 5, and the START card of Up or Down as a sixth. */
+    private val perSuit = g.ranks.size
+    private val numIds = numSuits * perSuit
 
-    private fun id(suit: Int, rank: Int) = suit * 5 + (rank - 1)
-    private fun suitOf(id: Int) = id / 5
-    private fun rankOf(id: Int) = id % 5 + 1
+    private fun id(suit: Int, rank: Int) = suit * perSuit + (if (rank == START_RANK) 5 else rank - 1)
+    private fun suitOf(id: Int) = id / perSuit
+    private fun rankOf(id: Int) = id % perSuit + 1 + (if (id % perSuit == 5) START_RANK - 6 else 0)
 
     private val total = IntArray(numIds) { g.copies(suitOf(it), rankOf(it)) }
 
@@ -44,7 +46,7 @@ internal class Deduction(private val g: GameState) {
         g.hands.forEachIndexed { p, hand -> hand.forEach { owner[it] = p } }
     }
 
-    private fun known(c: Card) = c.suit in 0 until numSuits && c.rank in 1..5
+    private fun known(c: Card) = c.suit in 0 until numSuits && c.rank in g.ranks
 
     private fun idsOf(c: Card): Set<Int> = c.possible.mapTo(HashSet()) { id(it.first, it.second) }
 

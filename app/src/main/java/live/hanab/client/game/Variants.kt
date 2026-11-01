@@ -38,6 +38,10 @@ data class SuitInfo(
     val prism: Boolean = false,
     /** Orange: attempting to play a card of the suit discards it, and attempting to discard it plays it. */
     val inverted: Boolean = false,
+    /** Reversed suits are played 5, 4, 3, 2, 1 and have one 1 and three 5s. */
+    val reversed: Boolean = false,
+    /** The suit this one is the reversed version of (its own name for any other suit): its symbol is the same. */
+    val base: String = name,
 )
 
 /**
@@ -81,6 +85,8 @@ data class VariantRules(
     val duck: Boolean = false,
     /** Throw It in a Hole: played cards go face down, and the score and strikes stay hidden until the game is over. */
     val throwItInAHole: Boolean = false,
+    /** Up or Down: a stack starts with a 1, a 5 or a START card and runs up or down from there. */
+    val upOrDown: Boolean = false,
 ) {
     /**
      * Whether the bot library plays this variant. It reads which ranks Pink-, Brown- and Deceptive-Ones touch (and never gave
@@ -89,7 +95,7 @@ data class VariantRules(
     val botCanPlay: Boolean
         get() = clueRanks.isNotEmpty() && !oddsAndEvens && !funnels && !chimneys && !synesthesia &&
             !colorCluesTouchNothing && !rankCluesTouchNothing && !alternatingClues && clueColorsOverride == null &&
-            !cowAndPig && !duck && !throwItInAHole
+            !cowAndPig && !duck && !throwItInAHole && !upOrDown
 }
 
 /** Suits and variants from the bundled copies of hanab.live's suits.json and variants.json. */
@@ -108,7 +114,7 @@ object Variants {
         "specialRank", "specialRankAllClueColors", "specialRankNoClueColors", "criticalRank", "scarceOnes", "clueStarved",
         "clueRanks", "specialRankAllClueRanks", "specialRankNoClueRanks", "specialRankDeceptive", "oddsAndEvens", "funnels", "chimneys",
         "synesthesia", "colorCluesTouchNothing", "rankCluesTouchNothing", "alternatingClues", "clueColors", "cowAndPig", "duck",
-        "throwItInAHole",
+        "throwItInAHole", "upOrDown",
     )
     private var rulesByVariant: Map<String, VariantRules> = emptyMap()
 
@@ -157,6 +163,8 @@ object Variants {
                 inverted = o.flag("inverted"),
             )
         }
+        // Every suit also exists reversed (the website adds " Reversed" to a suit's name), played from 5 down to 1.
+        for ((n, i) in infos.toMap()) infos["$n Reversed"] = i.copy(name = "$n Reversed", reversed = true, base = i.base)
         suitInfos = infos
 
         val byName = mutableMapOf<String, List<String>>()
@@ -194,6 +202,7 @@ object Variants {
                     cowAndPig = o.flag("cowAndPig"),
                     duck = o.flag("duck"),
                     throwItInAHole = o.flag("throwItInAHole"),
+                    upOrDown = o.flag("upOrDown"),
                 )
             }
         }
@@ -210,11 +219,39 @@ object Variants {
 
     fun info(suit: String): SuitInfo = suitInfos[suit] ?: SuitInfo(suit)
 
+    /** The symbols an automatic pip picks from, in order (the website's AUTO_PIP_PRIORITY). */
+    private val autoPips = listOf("hanabiRed1", "hanabiYellow2", "hanabiGreen3", "hanabiBlue4", "hanabiWhite5", "hanabiAltWhite6")
+
+    /**
+     * The symbol of each suit in [variant], by suit name. A suit with "auto" as its symbol (Tomato, Mahogany... of the
+     * Ambiguous variants) takes the first one in [autoPips] that no earlier suit of the variant uses, as the website does.
+     */
+    fun pipsOf(variant: String): Map<String, String> {
+        val out = LinkedHashMap<String, String>()
+        val used = mutableListOf<String>()
+        for (suit in suits(variant).orEmpty()) {
+            val key = info(suit).pip.let { p -> if (p == "auto") autoPips.firstOrNull { it !in used } ?: p else p }
+            used += key
+            out[suit] = key
+        }
+        return out
+    }
+
+    @Volatile private var currentName: String? = null
+    @Volatile private var currentPips: Map<String, String> = emptyMap()
+
+    /** Makes [variant] the one whose symbols [pipFile] looks up (the game on screen). */
+    fun useVariant(variant: String) {
+        if (variant == currentName) return
+        currentPips = pipsOf(variant)
+        currentName = variant
+    }
+
     /** Asset file (in assets/pips) holding the symbol for [suit], or null if there is none. */
     fun pipFile(suit: String): String? {
-        val key = info(suit).pip
+        val key = currentPips[suit] ?: info(suit).pip
         val file = when (key) {
-            "auto" -> suit.lowercase()
+            "auto" -> info(suit).base.lowercase()
             "hanabiRed1" -> "red"
             "hanabiYellow2" -> "yellow"
             "hanabiGreen3" -> "green"

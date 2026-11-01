@@ -1,5 +1,7 @@
 package live.hanab.client
 
+import live.hanab.client.game.Card
+import live.hanab.client.game.START_RANK
 import kotlinx.serialization.json.JsonObject
 import live.hanab.client.game.GameState
 import live.hanab.client.game.NoteEntry
@@ -450,6 +452,72 @@ class GameStateTest {
         assertEquals(null, g.playWarning(setOf(0 to 3)))
         // The score shows once the game is over.
         assert(!discarded.copy(phase = live.hanab.client.game.Phase.Over).hidesScore)
+    }
+
+    private fun directional(upOrDown: Boolean, reversedSuit: Boolean): GameState {
+        val infos = listOf(
+            live.hanab.client.game.SuitInfo("Red"),
+            live.hanab.client.game.SuitInfo("Yellow Reversed", colors = listOf("Yellow"), reversed = reversedSuit, base = "Yellow"),
+        )
+        return GameState(
+            tableID = 1, playerNames = listOf("me", "bob"), ourIndex = 0, spectating = false,
+            variantName = "x", suits = infos.map { it.name }, suitInfos = infos,
+            rules = live.hanab.client.game.VariantRules(upOrDown = upOrDown),
+        )
+    }
+
+    private fun play(g: GameState, suit: Int, rank: Int, order: Int) = g
+        .apply(j("""{"type":"draw","playerIndex":0,"order":$order,"suitIndex":$suit,"rank":$rank}"""))
+        .apply(j("""{"type":"play","playerIndex":0,"order":$order,"suitIndex":$suit,"rank":$rank}"""))
+
+    @Test fun aReversedSuitIsPlayedFromFiveDown() {
+        var g = directional(upOrDown = false, reversedSuit = true)
+        assertEquals(listOf(1), g.nextRanks(0))                          // a normal suit starts at 1
+        assertEquals(listOf(5), g.nextRanks(1))                          // the reversed one at 5
+        g = play(g, 1, 5, 0)
+        assertEquals(listOf(4), g.nextRanks(1))
+        assertEquals(5, g.stackTop(1))
+        g = play(g, 1, 4, 1)
+        assertEquals(listOf(3), g.nextRanks(1))
+        assertEquals(2, g.stacks[1])                                     // two cards on the stack
+        assert(g.isDeadIdentity(1, 5) && g.isDeadIdentity(1, 4) && !g.isDeadIdentity(1, 3))
+        // Losing every copy of a 3 (there are two) kills the 2 and the 1 behind it.
+        val lost = g.copy(discards = listOf(10, 11), cards = g.cards +
+            mapOf(10 to Card(10, 1, 3, setOf(1 to 3)), 11 to Card(11, 1, 3, setOf(1 to 3))))
+        assert(lost.isDeadIdentity(1, 2) && lost.isDeadIdentity(1, 1))
+        // Copies: one 1, two each of 2 to 4 and three 5s.
+        val info = live.hanab.client.game.SuitInfo("Reversed", reversed = true)
+        val rules = live.hanab.client.game.VariantRules()
+        assertEquals(listOf(1, 2, 2, 2, 3), (1..5).map { GameState.copiesOf(info, it, rules) })
+        assertEquals(10, (1..5).sumOf { GameState.copiesOf(info, it, rules) })
+    }
+
+    @Test fun anUpOrDownStackRunsEitherWayFromItsFirstCards() {
+        var g = directional(upOrDown = true, reversedSuit = false)
+        assertEquals(listOf(1, 5, START_RANK).sorted(), g.nextRanks(0).sorted())
+        g = play(g, 0, 1, 0)
+        assertEquals(listOf(2), g.nextRanks(0))                          // started with a 1: it goes up
+        assert(g.isDeadIdentity(0, 1) && !g.isDeadIdentity(0, 5))
+        g = play(g, 0, 2, 1)
+        assertEquals(listOf(3), g.nextRanks(0))
+        // A START card allows a 2 (up) or a 4 (down).
+        var s = play(directional(true, false), 0, START_RANK, 0)
+        assertEquals(listOf(2, 4), s.nextRanks(0).sorted())
+        s = play(s, 0, 4, 1)
+        assertEquals(listOf(3), s.nextRanks(0))                          // now it runs down
+        assertEquals(4, s.stackTop(0))
+        // Starting at 5 runs down.
+        assertEquals(listOf(4), play(directional(true, false), 0, 5, 0).nextRanks(0))
+        // A full stack accepts nothing.
+        var done = directional(true, false)
+        listOf(5, 4, 3, 2, 1).forEachIndexed { i, r -> done = play(done, 0, r, i) }
+        assertEquals(emptyList<Int>(), done.nextRanks(0))
+        // The deck: one 1, two of 2 to 4, one 5 and one START per suit.
+        val info = live.hanab.client.game.SuitInfo("Red")
+        val rules = live.hanab.client.game.VariantRules(upOrDown = true)
+        assertEquals(listOf(1, 2, 2, 2, 1, 1), (listOf(1, 2, 3, 4, 5, START_RANK)).map { GameState.copiesOf(info, it, rules) })
+        assertEquals(9 * 2, GameState.deckCards(listOf(info, info), rules))
+        assertEquals(listOf(1, 2, 3, 4, 5, START_RANK), g.ranks)
     }
 
     @Test fun colorMuteOffersNoColourClues() {

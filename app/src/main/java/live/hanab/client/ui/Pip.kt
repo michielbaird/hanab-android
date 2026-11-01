@@ -43,8 +43,13 @@ object PipStore {
     }
 
     @Synchronized
-    fun get(suit: String): ImageBitmap? = cache.getOrPut(suit) {
-        val file = Variants.pipFile(suit) ?: return@getOrPut null
+    fun get(suit: String): ImageBitmap? {
+        val file = Variants.pipFile(suit) ?: return null
+        return load(file)
+    }
+
+    /** One bitmap per symbol file: the suits of an Ambiguous variant share the first symbols between them. */
+    private fun load(file: String): ImageBitmap? = cache.getOrPut(file) {
         try {
             context.assets.open(file).use { stream ->
                 val svg = SVG.getFromInputStream(stream)
