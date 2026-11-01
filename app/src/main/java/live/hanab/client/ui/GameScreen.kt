@@ -130,6 +130,17 @@ fun suitColor(name: String): Color {
     }
 }
 
+/**
+ * The colour of a prism card, which depends on its rank: the clue colour that goes with the rank mixed half and half
+ * with white (black for the dark prism), as the website paints it. Null for any other card.
+ */
+fun prismColor(g: live.hanab.client.game.GameState, suit: Int, rank: Int): Color? {
+    val info = g.suitInfos.getOrNull(suit)?.takeIf { it.prism } ?: return null
+    val i = g.prismIndex(rank)
+    if (rank !in 1..5 || i < 0) return null
+    return androidx.compose.ui.graphics.lerp(suitColor(g.clueColors[i]), if (info.oneOfEach) Color.Black else Color.White, 0.5f)
+}
+
 /** Like [suitColor], but multi-colour suits (Rainbow) get a left-to-right gradient. */
 fun suitBrush(name: String): androidx.compose.ui.graphics.Brush {
     val fills = live.hanab.client.game.Variants.info(name).fills
@@ -781,7 +792,7 @@ private fun CluePanel(
                     ) { onChoice(option) }
                 }
             }
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            if (g.rules.clueRanks.isNotEmpty()) Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 g.rules.clueRanks.forEach { r ->
                     val option = ClueChoice.Rank(r)
                     ClueToggle(
@@ -909,8 +920,10 @@ private fun CardView(g: GameState, c: Card, known: Boolean, note: String? = null
     val realId = if (known && c.suit >= 0 && c.rank >= 0) setOf(c.suit to c.rank) else emptySet()
     val knownSuit = if (known) c.suit else c.possibleSuits.singleOrNull() ?: -1
     val knownRank = if (known) c.rank else c.possibleRanks.singleOrNull() ?: -1
+    val prism = if (knownSuit >= 0 && knownRank >= 1) prismColor(g, knownSuit, knownRank) else null
     val bgBrush: androidx.compose.ui.graphics.Brush = when {
         knownSuit < 0 -> androidx.compose.ui.graphics.SolidColor(Color(0xFF424242))
+        prism != null -> androidx.compose.ui.graphics.SolidColor(prism)
         dead -> dullBrush(g.suits[knownSuit])
         else -> suitBrush(g.suits[knownSuit])
     }
@@ -929,7 +942,7 @@ private fun CardView(g: GameState, c: Card, known: Boolean, note: String? = null
                 fill = if (dead) Color(0xFFBDBDBD) else Color.White,
             )
         } else {
-            HanabCardFace(if (knownSuit >= 0) g.suits[knownSuit] else null, knownRank, dead, Modifier.fillMaxSize())
+            HanabCardFace(if (knownSuit >= 0) g.suits[knownSuit] else null, knownRank, dead, Modifier.fillMaxSize(), wash = prism)
         }
         if (!known && knownRank < 0 && c.possibleRanks.size < 5) {
             Text(

@@ -17,6 +17,7 @@ import kotlinx.serialization.json.jsonPrimitive
  *  noColors    touched by no colour clue (White)
  *  allRanks    touched by every rank clue (Pink)
  *  noRanks     touched by no rank clue (Brown)
+ *  prism       touched by the colour that goes with the card's rank (Prism)
  *  fills       display colours as ARGB ints; more than one means a gradient (Rainbow)
  */
 data class SuitInfo(
@@ -33,6 +34,8 @@ data class SuitInfo(
     val oneOfEach: Boolean = false,
     /** Alternative fills for colour-blind players (only some colours define one). */
     val fillsColorblind: List<Int> = emptyList(),
+    /** A prism suit: a card is touched by the clue colour that goes with its rank (1 = the first colour, then round). */
+    val prism: Boolean = false,
 )
 
 /**
@@ -62,11 +65,13 @@ data class VariantRules(
     /** A rank clue also touches every lower rank (Funnels) or every higher rank (Chimneys). */
     val funnels: Boolean = false,
     val chimneys: Boolean = false,
+    /** Synesthesia: every card is also touched by the colour that goes with its rank, and there are no rank clues. */
+    val synesthesia: Boolean = false,
 ) {
     /** Whether the bot library plays this variant: it knows none of the rank-clue rules above (it would give clues that do not exist). */
     val botCanPlay: Boolean
         get() = clueRanks == listOf(1, 2, 3, 4, 5) && !rankTouchedByAllRanks && !rankTouchedByNoRanks && !rankDeceptive &&
-            !oddsAndEvens && !funnels && !chimneys
+            !oddsAndEvens && !funnels && !chimneys && !synesthesia
 }
 
 /** Suits and variants from the bundled copies of hanab.live's suits.json and variants.json. */
@@ -76,7 +81,7 @@ object Variants {
     private var supportedNames: List<String> = emptyList()
     private var namesById: Map<Int, String> = emptyMap()
 
-    /** Suits we cannot model yet (changed copy counts, inverted stacks, rank-dependent colours). */
+    /** Suits we cannot model yet (the Orange suit, whose plays and discards swap). */
     private val unsupportedSuits = mutableSetOf<String>()
 
     /** Variant keys that are pure metadata, and the special rules we model; any other key is a rule we do not implement. */
@@ -84,6 +89,7 @@ object Variants {
     private val modelledKeys = plainKeys + setOf(
         "specialRank", "specialRankAllClueColors", "specialRankNoClueColors", "criticalRank", "scarceOnes", "clueStarved",
         "clueRanks", "specialRankAllClueRanks", "specialRankNoClueRanks", "specialRankDeceptive", "oddsAndEvens", "funnels", "chimneys",
+        "synesthesia",
     )
     private var rulesByVariant: Map<String, VariantRules> = emptyMap()
 
@@ -128,8 +134,9 @@ object Variants {
                 o.str("pip") ?: "auto",
                 o.flag("oneOfEach"),
                 fillsCb,
+                prism = o.flag("prism"),
             )
-            if (o.flag("prism") || o.flag("inverted")) unsupportedSuits += name
+            if (o.flag("inverted")) unsupportedSuits += name
         }
         suitInfos = infos
 
@@ -160,6 +167,7 @@ object Variants {
                     oddsAndEvens = o.flag("oddsAndEvens"),
                     funnels = o.flag("funnels"),
                     chimneys = o.flag("chimneys"),
+                    synesthesia = o.flag("synesthesia"),
                 )
             }
         }

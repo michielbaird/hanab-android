@@ -94,7 +94,7 @@ fun FlightCard(g: GameState, flight: Flight, origin: Offset, onDone: () -> Unit)
             }
             .then(
                 if (hanabFace) Modifier else Modifier.background(
-                    if (faceUp && suitName != null) suitBrush(suitName) else androidx.compose.ui.graphics.SolidColor(Color(0xFF424242)),
+                    if (faceUp && suitName != null) (prismColor(g, m.suit, m.rank)?.let { androidx.compose.ui.graphics.SolidColor(it) } ?: suitBrush(suitName)) else androidx.compose.ui.graphics.SolidColor(Color(0xFF424242)),
                     RoundedCornerShape(8.dp),
                 ),
             )
@@ -105,7 +105,7 @@ fun FlightCard(g: GameState, flight: Flight, origin: Offset, onDone: () -> Unit)
         contentAlignment = Alignment.Center,
     ) {
         if (hanabFace) {
-            HanabCardFace(suitName, m.rank, false, Modifier.fillMaxSize())
+            HanabCardFace(suitName, m.rank, false, Modifier.fillMaxSize(), wash = prismColor(g, m.suit, m.rank))
         } else {
             if (faceUp && suitName != null) Pip(suitName, 16.dp, Modifier.align(Alignment.TopCenter).offset(y = 4.dp))
             OutlinedText(if (faceUp && m.rank > 0) "${m.rank}" else "?", 30.sp)

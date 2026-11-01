@@ -34,13 +34,22 @@ class VariantsTest {
 
     @Test fun variantsWithSpecialRulesOrUnmodelledSuitsAreNot() {
         assertFalse(Variants.isSupported("Not a real variant"))
-        // Anything with a Prism suit (cycling colours) or one of the special-rule keys is out.
-        val prism = Variants.suits("Prism (5 Suits)") != null
-        if (prism) assertFalse(Variants.isSupported("Prism (5 Suits)"))
+        // Anything with an Orange suit or one of the rules we do not model is out.
         assertFalse(Variants.isSupported("Up or Down (5 Suits)"))
         assertFalse(Variants.isSupported("Sudoku (5 Suits)"))
         assertFalse(Variants.isSupported("Throw It in a Hole (5 Suits)"))
         assertFalse(Variants.isSupported("Orange (5 Suits)"))
+    }
+
+    @Test fun prismAndSynesthesiaAreModelled() {
+        for (v in listOf("Prism (5 Suits)", "Dark Prism (5 Suits)", "Synesthesia (5 Suits)", "Pink-Ones & Prism (6 Suits)")) {
+            assertTrue("$v should be supported", Variants.isSupported(v))
+        }
+        assertTrue(Variants.info("Prism").prism)
+        assertTrue(Variants.rules("Synesthesia (5 Suits)").synesthesia)
+        assertEquals(emptyList<Int>(), Variants.rules("Synesthesia (5 Suits)").clueRanks)    // no rank clues at all
+        assertFalse("Orange stays out", Variants.isSupported("Orange & Prism (6 Suits)"))
+        assertFalse("the bot does not play Synesthesia", "Synesthesia (5 Suits)" in Variants.botSupported())
     }
 
     @Test fun theRankClueRulesAreModelledButTheBotDoesNotPlayThem() {

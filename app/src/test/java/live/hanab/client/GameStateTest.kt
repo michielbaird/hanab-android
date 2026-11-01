@@ -334,4 +334,37 @@ class GameStateTest {
         assert(!one.canClue)                                            // half a clue is not enough to give one
         assert(g.copy(clues = 2).canClue)
     }
+
+    @Test fun aPrismCardIsTouchedByTheColourThatGoesWithItsRank() {
+        val infos = listOf(
+            live.hanab.client.game.SuitInfo("Red"),
+            live.hanab.client.game.SuitInfo("Yellow"),
+            live.hanab.client.game.SuitInfo("Prism", colors = emptyList(), prism = true),
+        )
+        val g = GameState(
+            tableID = 1, playerNames = listOf("me", "bob"), ourIndex = 0, spectating = false,
+            variantName = "Prism (3 Suits)", suits = infos.map { it.name }, suitInfos = infos,
+        )
+        assertEquals(listOf("Red", "Yellow"), g.clueColors)             // Prism adds no colour of its own
+        assert(g.touchesColor(2, 1, 0) && !g.touchesColor(2, 1, 1))     // a prism 1 is Red
+        assert(g.touchesColor(2, 2, 1) && !g.touchesColor(2, 2, 0))     // a prism 2 is Yellow
+        assert(g.touchesColor(2, 3, 0))                                 // a 3 wraps round to Red
+        assert(g.touchesColor(2, 5, 0))
+        assert(g.touchesColor(0, 1, 0) && !g.touchesColor(0, 2, 1))    // other suits as usual
+    }
+
+    @Test fun synesthesiaAddsTheColourOfTheRankToEveryCard() {
+        val infos = listOf(live.hanab.client.game.SuitInfo("Red"), live.hanab.client.game.SuitInfo("Yellow"))
+        val g = GameState(
+            tableID = 1, playerNames = listOf("me", "bob"), ourIndex = 0, spectating = false,
+            variantName = "Synesthesia (2 Suits)", suits = infos.map { it.name }, suitInfos = infos,
+            rules = live.hanab.client.game.VariantRules(synesthesia = true, clueRanks = emptyList()),
+        )
+        // The colour for a rank: 1 red, 2 yellow, 3 red again, and so on.
+        assert(g.touchesColor(0, 1, 0) && !g.touchesColor(0, 1, 1))     // red 1: its own red, and the 1's red only
+        assert(g.touchesColor(0, 2, 0) && g.touchesColor(0, 2, 1))      // red 2: its own red and the 2's yellow
+        assert(g.touchesColor(1, 1, 0) && g.touchesColor(1, 1, 1))      // yellow 1: its own yellow and the 1's red
+        assert(g.touchesColor(1, 3, 0) && g.touchesColor(1, 3, 1))      // yellow 3: its own yellow and the 3's red
+        assert(g.touchesColor(0, 3, 0) && !g.touchesColor(0, 3, 1))     // red 3: red twice over, never yellow
+    }
 }
