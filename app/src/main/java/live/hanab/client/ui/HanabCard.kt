@@ -94,7 +94,7 @@ fun HanabCardFace(suit: String?, rank: Int, dull: Boolean, modifier: Modifier = 
         drawRect(Color.Black.copy(alpha = 1f - TABLE_DARKEN), blendMode = BlendMode.SrcAtop)
     }
 }
-
+    
 
 
 private fun DrawScope.drawCardFace(measurer: TextMeasurer, suit: String?, rank: Int, pips: Boolean, wash: Color?) {

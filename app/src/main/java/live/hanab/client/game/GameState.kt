@@ -53,6 +53,8 @@ data class ClueMark(
     val target: Int,
     /** Turn number when the clue was given; the bubble lasts through the next turn. */
     val turn: Int,
+    /** Cow & Pig / Duck: "Moo", "Oink" or "Quack" is shown instead of the colour or rank. */
+    val sound: String? = null,
 )
 
 /** A card that was just drawn live; the UI flies it in from the deck. */
@@ -126,6 +128,8 @@ data class GameState(
     val lastClue: ClueMark? = null,
     /** Whether the last clue given in the game was a colour clue (null = none yet); Alternating Clues needs it. */
     val lastClueWasColor: Boolean? = null,
+    /** Throw It in a Hole: the cards played or misplayed face down (their orders), which are on no stack and in no discard pile. */
+    val hole: List<Int> = emptyList(),
     /** Everyone's notes by card order, as the server sends them to spectators and in replays. */
     val allNotes: Map<Int, List<NoteEntry>> = emptyMap(),
     /** True identities of every card (index = card order), sent once the game is a replay. */
@@ -263,6 +267,13 @@ data class GameState(
         return rank == clueRank
     }
 
+    /** What a clue is announced as in Cow & Pig ("Moo" for a colour, "Oink" for a rank) and Duck ("Quack"), else null. */
+    fun clueSound(isColor: Boolean): String? = when {
+        rules.cowAndPig -> if (isColor) "Moo" else "Oink"
+        rules.duck -> "Quack"
+        else -> null
+    }
+
     /** How a rank clue is called: its rank, or "Odds" / "Evens". */
     fun rankClueLabel(clueRank: Int): String =
         if (rules.oddsAndEvens) (if (clueRank == 1) "Odds" else "Evens") else "$clueRank"
@@ -363,18 +374,24 @@ data class GameState(
             "play" -> {
                 val p = int("playerIndex"); val o = int("order"); val s = int("suitIndex"); val r = int("rank")
                 val newStacks = if (s in stacks.indices) stacks.mapIndexed { i, v -> if (i == s) r else v } else stacks
+                // Throw It in a Hole: the server hides what was played, and the card goes in the hole, not on a stack.
+                val hidden = rules.throwItInAHole && s < 0
                 removeFromHand(p, o).copy(
                     cards = cards.reveal(o, s, r),
                     stacks = newStacks,
+                    hole = if (hidden) hole + o else hole,
                 ).logged("${name(p)} played ${cardName(s, r)}")
             }
             "discard" -> {
                 val p = int("playerIndex"); val o = int("order"); val s = int("suitIndex"); val r = int("rank")
                 val failed = a["failed"]?.jsonPrimitive?.booleanOrNull ?: false
+                // An unknown misplay counts as a play in Throw It in a Hole.
+                val hidden = rules.throwItInAHole && failed && s < 0
                 removeFromHand(p, o).copy(
                     cards = cards.reveal(o, s, r),
-                    discards = discards + o,
-                ).logged("${name(p)} ${if (failed) "misplayed" else "discarded"} ${cardName(s, r)}")
+                    discards = if (hidden) discards else discards + o,
+                    hole = if (hidden) hole + o else hole,
+                ).logged("${name(p)} ${if (hidden) "played" else if (failed) "misplayed" else "discarded"} ${cardName(s, r)}")
             }
             "clue" -> {
                 val clue = a["clue"]!!.jsonObject
@@ -388,14 +405,16 @@ data class GameState(
                     if (o !in hands.getOrElse(target) { emptyList() }) c
                     else {
                         val hit = o in touched
-                        // Keep identities that agree with whether this card was touched.
-                        val kept = c.possible.filter { (s, r) ->
+                        // Keep identities that agree with whether this card was touched (not when the clue is only said
+                        // aloud, as in Cow & Pig and Duck).
+                        val kept = if (rules.cowAndPig || rules.duck) c.possible else c.possible.filter { (s, r) ->
                             (if (isColor) touchesColor(s, r, value) else touchesRank(s, r, value)) == hit
                         }.toSet()
                         c.copy(possible = kept.ifEmpty { c.possible }, clued = c.clued || hit, clueApplied = true)
                     }
                 }
                 val what = if (isColor) clueColors.getOrElse(value) { "?" } else rankClueLabel(value)
+                val sound = clueSound(isColor)
                 copy(
                     cards = newCards,
                     lastClueWasColor = isColor,
@@ -406,9 +425,12 @@ data class GameState(
                         color = if (isColor) clueColors.getOrNull(value) else null,
                         rank = if (isColor) null else value,
                         rankLabel = if (isColor) null else rankClueLabel(value),
-                        giver = giver, target = target, turn = turn,
+                        giver = giver, target = target, turn = turn, sound = sound,
                     ),
-                ).logged("${name(giver)} told ${name(target)} $what (${touched.size} card${if (touched.size == 1) "" else "s"})")
+                ).logged(
+                    if (sound != null) "${name(giver)} ${sound.lowercase()}s at ${name(target)} (${touched.size} card${if (touched.size == 1) "" else "s"})"
+                    else "${name(giver)} told ${name(target)} $what (${touched.size} card${if (touched.size == 1) "" else "s"})",
+                )
             }
             "status" -> copy(clues = int("clues"), score = int("score"), maxScore = int("maxScore"))
             "strike" -> copy(strikes = int("num"))
@@ -451,11 +473,14 @@ data class GameState(
     /** Whether any suit swaps plays and discards: then discarding is allowed even with every clue token. */
     val hasInverted: Boolean get() = suitInfos.any { it.inverted }
 
+    /** Throw It in a Hole hides the score and the strikes from the players until the game is over. */
+    val hidesScore: Boolean get() = rules.throwItInAHole && phase == Phase.Playing && !spectating && !readOnly
+
     private fun cap(s: String) = s.replaceFirstChar { it.uppercase() }
 
     /** What to ask before discarding a card that could be any of [ids], or null if it is fine. Discarding an Orange card plays it. */
     fun discardWarning(ids: Set<Pair<Int, Int>>): String? {
-        if (ids.isEmpty()) return null
+        if (ids.isEmpty() || rules.throwItInAHole) return null
         if (ids.all { invertedSuit(it.first) }) {
             return if (ids.any { (s, r) -> r == stacks[s] + 1 }) null
             else cap("${describe(ids)} is an Orange card, so discarding it plays it, and it cannot be played right now. Discard it anyway?")
@@ -470,7 +495,7 @@ data class GameState(
 
     /** What to ask before playing a card that could be any of [ids], or null if it is fine. Playing an Orange card discards it. */
     fun playWarning(ids: Set<Pair<Int, Int>>): String? {
-        if (ids.isEmpty()) return null
+        if (ids.isEmpty() || rules.throwItInAHole) return null
         if (ids.all { invertedSuit(it.first) }) return when {
             allCritical(ids) -> cap("${describe(ids)} is the last copy of a card you still need, and playing an Orange card discards it. Play it anyway?")
             allPlayableNow(ids) -> cap("${describe(ids)} can go on its stack, but playing an Orange card discards it. Play it anyway?")

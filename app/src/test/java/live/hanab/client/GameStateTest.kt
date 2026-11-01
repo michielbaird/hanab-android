@@ -416,6 +416,42 @@ class GameStateTest {
         assert(!g.isPlayable(live.hanab.client.game.Card(order = 0, suit = 1, rank = 1, possible = orange1)))
     }
 
+    @Test fun cowAndPigAndDuckClueTellTheCardsNothing() {
+        val clue = j("""{"type":"clue","clue":{"type":0,"value":0},"giver":1,"target":0,"list":[0],"turn":0}""")
+        val draws = (0..1).map { j("""{"type":"draw","playerIndex":0,"order":$it,"suitIndex":-1,"rank":-1}""") }
+        val cow = twoSuits(live.hanab.client.game.VariantRules(cowAndPig = true), "Cow & Pig (2 Suits)").applyAll(draws).apply(clue)
+        assertEquals("Moo", cow.lastClue!!.sound)
+        assert(cow.cards.getValue(0).clued)                                      // the card is marked...
+        assertEquals(10, cow.cards.getValue(0).possible.size)                    // ...but nothing is ruled out
+        assert(cow.log.last().text.contains("moos"))
+        val rank = j("""{"type":"clue","clue":{"type":1,"value":3},"giver":1,"target":0,"list":[0],"turn":0}""")
+        assertEquals("Oink", cow.apply(rank).lastClue!!.sound)
+        val duck = twoSuits(live.hanab.client.game.VariantRules(duck = true), "Duck (2 Suits)").applyAll(draws).apply(rank)
+        assertEquals("Quack", duck.lastClue!!.sound)
+        // A normal variant narrows the possibilities as before.
+        val plain = twoSuits(live.hanab.client.game.VariantRules(), "x").applyAll(draws).apply(clue)
+        assertEquals(null, plain.lastClue!!.sound)
+        assertEquals(5, plain.cards.getValue(0).possible.size)               // only the red ones are left
+    }
+
+    @Test fun throwItInAHolePutsHiddenPlaysInTheHoleAndHidesTheScore() {
+        val g = twoSuits(live.hanab.client.game.VariantRules(throwItInAHole = true), "Throw It in a Hole (2 Suits)")
+            .applyAll((0..3).map { j("""{"type":"draw","playerIndex":${it % 2},"order":$it,"suitIndex":-1,"rank":-1}""") })
+        assert(g.hidesScore)
+        val played = g.apply(j("""{"type":"play","playerIndex":1,"order":1,"suitIndex":-1,"rank":-1}"""))
+        assertEquals(listOf(1), played.hole)
+        assertEquals(listOf(0, 0), played.stacks)
+        val missed = played.apply(j("""{"type":"discard","playerIndex":0,"order":2,"suitIndex":-1,"rank":-1,"failed":true}"""))
+        assertEquals(listOf(1, 2), missed.hole)
+        assertEquals(emptyList<Int>(), missed.discards)
+        // An ordinary discard still goes to the pile, and nothing warns about a play.
+        val discarded = missed.apply(j("""{"type":"discard","playerIndex":1,"order":3,"suitIndex":-1,"rank":-1,"failed":false}"""))
+        assertEquals(listOf(3), discarded.discards)
+        assertEquals(null, g.playWarning(setOf(0 to 3)))
+        // The score shows once the game is over.
+        assert(!discarded.copy(phase = live.hanab.client.game.Phase.Over).hidesScore)
+    }
+
     @Test fun colorMuteOffersNoColourClues() {
         val g = twoSuits(live.hanab.client.game.VariantRules(clueColorsOverride = emptyList()), "Color Mute (2 Suits)")
         assertEquals(emptyList<String>(), g.clueColors)

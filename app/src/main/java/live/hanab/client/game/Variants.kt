@@ -76,6 +76,11 @@ data class VariantRules(
     val alternatingClues: Boolean = false,
     /** The colour clues on offer when the variant names them (Color Mute: none), else null for the colours of the suits. */
     val clueColorsOverride: List<String>? = null,
+    /** Cow & Pig and Duck: a clue is announced as "moo" / "oink" / "quack" and tells the cards nothing (it is said aloud). */
+    val cowAndPig: Boolean = false,
+    val duck: Boolean = false,
+    /** Throw It in a Hole: played cards go face down, and the score and strikes stay hidden until the game is over. */
+    val throwItInAHole: Boolean = false,
 ) {
     /**
      * Whether the bot library plays this variant. It reads which ranks Pink-, Brown- and Deceptive-Ones touch (and never gave
@@ -83,7 +88,8 @@ data class VariantRules(
      */
     val botCanPlay: Boolean
         get() = clueRanks.isNotEmpty() && !oddsAndEvens && !funnels && !chimneys && !synesthesia &&
-            !colorCluesTouchNothing && !rankCluesTouchNothing && !alternatingClues && clueColorsOverride == null
+            !colorCluesTouchNothing && !rankCluesTouchNothing && !alternatingClues && clueColorsOverride == null &&
+            !cowAndPig && !duck && !throwItInAHole
 }
 
 /** Suits and variants from the bundled copies of hanab.live's suits.json and variants.json. */
@@ -101,7 +107,8 @@ object Variants {
     private val modelledKeys = plainKeys + setOf(
         "specialRank", "specialRankAllClueColors", "specialRankNoClueColors", "criticalRank", "scarceOnes", "clueStarved",
         "clueRanks", "specialRankAllClueRanks", "specialRankNoClueRanks", "specialRankDeceptive", "oddsAndEvens", "funnels", "chimneys",
-        "synesthesia", "colorCluesTouchNothing", "rankCluesTouchNothing", "alternatingClues", "clueColors",
+        "synesthesia", "colorCluesTouchNothing", "rankCluesTouchNothing", "alternatingClues", "clueColors", "cowAndPig", "duck",
+        "throwItInAHole",
     )
     private var rulesByVariant: Map<String, VariantRules> = emptyMap()
 
@@ -184,6 +191,9 @@ object Variants {
                     rankCluesTouchNothing = o.flag("rankCluesTouchNothing"),
                     alternatingClues = o.flag("alternatingClues"),
                     clueColorsOverride = (o["clueColors"] as? JsonArray)?.map { it.jsonPrimitive.content },
+                    cowAndPig = o.flag("cowAndPig"),
+                    duck = o.flag("duck"),
+                    throwItInAHole = o.flag("throwItInAHole"),
                 )
             }
         }

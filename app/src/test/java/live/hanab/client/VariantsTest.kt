@@ -37,7 +37,7 @@ class VariantsTest {
         // Anything with one of the rules we do not model is out.
         assertFalse(Variants.isSupported("Up or Down (5 Suits)"))
         assertFalse(Variants.isSupported("Sudoku (5 Suits)"))
-        assertFalse(Variants.isSupported("Throw It in a Hole (5 Suits)"))
+        assertTrue(Variants.isSupported("Throw It in a Hole (5 Suits)"))
         assertTrue(Variants.isSupported("Orange (5 Suits)"))
     }
 
@@ -99,7 +99,17 @@ class VariantsTest {
         assertTrue("the bot plays Orange", "Orange (5 Suits)" in Variants.botSupported())
         assertTrue(Variants.info("Orange").inverted && Variants.info("Dark Orange").inverted)
         assertEquals("pips/orange.svg", Variants.pipFile("Orange"))
-        assertEquals(2275,Variants.allSupported().size)
+        assertEquals(2327, Variants.allSupported().size)
+    }
+
+    @Test fun cowAndPigDuckAndThrowItInAHoleAreModelled() {
+        assertTrue(Variants.rules("Cow & Pig (5 Suits)").cowAndPig)
+        assertTrue(Variants.rules("Duck (5 Suits)").duck)
+        assertTrue(Variants.rules("Throw It in a Hole (5 Suits)").throwItInAHole)
+        for (v in listOf("Cow & Pig (5 Suits)", "Duck (5 Suits)", "Throw It in a Hole (5 Suits)")) {
+            assertTrue("$v should be offered", Variants.isSupported(v))
+            assertFalse("the bot does not play $v", v in Variants.botSupported())
+        }
     }
 
     @Test fun onlyVariantsTheBotPlaysCanBeAnalysed() {
