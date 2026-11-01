@@ -316,7 +316,7 @@ private fun GameRow(line: GameLine, onAnalyze: () -> Unit, onClick: () -> Unit) 
             color = if (perfect) GOLD else Color.Unspecified,
         )
         // The bot, on this phone, goes through the game (not offered where the library is not packaged).
-        if (live.hanab.client.NativeOffline.available) {
+        if (live.hanab.client.NativeOffline.available && live.hanab.client.game.Variants.canAnalyze(line.variant)) {
             TextButton(onClick = onAnalyze) { Text("Analyze") }
         }
     }

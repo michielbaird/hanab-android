@@ -36,6 +36,8 @@ data class SuitInfo(
     val fillsColorblind: List<Int> = emptyList(),
     /** A prism suit: a card is touched by the clue colour that goes with its rank (1 = the first colour, then round). */
     val prism: Boolean = false,
+    /** Orange: attempting to play a card of the suit discards it, and attempting to discard it plays it. */
+    val inverted: Boolean = false,
 )
 
 /**
@@ -75,11 +77,13 @@ data class VariantRules(
     /** The colour clues on offer when the variant names them (Color Mute: none), else null for the colours of the suits. */
     val clueColorsOverride: List<String>? = null,
 ) {
-    /** Whether the bot library plays this variant: it knows none of the clue rules above (it would give clues that do not exist). */
+    /**
+     * Whether the bot library plays this variant. It reads which ranks Pink-, Brown- and Deceptive-Ones touch (and never gave
+     * a rank clue the variant lacks in 198 test games), but not Odds and Evens, Funnels, Chimneys, Synesthesia or the clue restrictions.
+     */
     val botCanPlay: Boolean
-        get() = clueRanks == listOf(1, 2, 3, 4, 5) && !rankTouchedByAllRanks && !rankTouchedByNoRanks && !rankDeceptive &&
-            !oddsAndEvens && !funnels && !chimneys && !synesthesia && !colorCluesTouchNothing && !rankCluesTouchNothing &&
-            !alternatingClues && clueColorsOverride == null
+        get() = clueRanks.isNotEmpty() && !oddsAndEvens && !funnels && !chimneys && !synesthesia &&
+            !colorCluesTouchNothing && !rankCluesTouchNothing && !alternatingClues && clueColorsOverride == null
 }
 
 /** Suits and variants from the bundled copies of hanab.live's suits.json and variants.json. */
@@ -89,7 +93,7 @@ object Variants {
     private var supportedNames: List<String> = emptyList()
     private var namesById: Map<Int, String> = emptyMap()
 
-    /** Suits we cannot model yet (the Orange suit, whose plays and discards swap). */
+    /** Suits we cannot model yet (none at the moment). */
     private val unsupportedSuits = mutableSetOf<String>()
 
     /** Variant keys that are pure metadata, and the special rules we model; any other key is a rule we do not implement. */
@@ -143,8 +147,8 @@ object Variants {
                 o.flag("oneOfEach"),
                 fillsCb,
                 prism = o.flag("prism"),
+                inverted = o.flag("inverted"),
             )
-            if (o.flag("inverted")) unsupportedSuits += name
         }
         suitInfos = infos
 
@@ -215,6 +219,7 @@ object Variants {
             "infinity" -> "omni"
             "emptySet" -> "null"
             "triangle" -> "prism"
+            "unoReverse" -> "orange"
             else -> return null
         }
         return "pips/$file.svg"
@@ -237,6 +242,11 @@ object Variants {
     /** What we can both show and the bots can play: the variants offered for offline games. */
     fun botSupported(): List<String> =
         supportedNames.filter { n -> botUnsupported.none { n.contains(it) } && rules(n).botCanPlay }
+
+    /** Whether the bot can go through a game of [variant] (the same variants it can play). */
+    fun canAnalyze(variant: String): Boolean = variant in botSupportedSet
+
+    private val botSupportedSet: Set<String> by lazy { botSupported().toSet() }
 
     /**
      * The variants in [among] that match [query], best first. Case, hyphens, "&" and brackets do not matter and every

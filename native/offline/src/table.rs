@@ -350,7 +350,8 @@ impl<'a> Table<'a> {
                 if target < 0 || !s.hands[self.human].contains(&(target as usize)) {
                     return Err("That card is not in your hand.".into());
                 }
-                if kind == 1 && s.clue_tokens >= 8 {
+                // An Orange card is played by discarding it, so the server allows a discard at any clue count then.
+                if kind == 1 && s.clue_tokens >= 8 && !self.variant.suits.iter().any(|x| x.suit_type.inverted) {
                     return Err("You cannot discard while the team has 8 clues.".into());
                 }
                 let t = target as usize;

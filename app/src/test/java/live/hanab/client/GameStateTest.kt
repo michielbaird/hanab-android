@@ -393,6 +393,29 @@ class GameStateTest {
         assert(twoSuits(live.hanab.client.game.VariantRules(), "x").copy(lastClueWasColor = true).clueAllowed(true, true))
     }
 
+    @Test fun anOrangeCardIsPlayedByDiscardingIt() {
+        val infos = listOf(live.hanab.client.game.SuitInfo("Red"), live.hanab.client.game.SuitInfo("Orange", inverted = true))
+        val g = GameState(
+            tableID = 1, playerNames = listOf("me", "bob"), ourIndex = 0, spectating = false,
+            variantName = "Orange (2 Suits)", suits = infos.map { it.name }, suitInfos = infos,
+        )
+        assert(g.hasInverted && g.invertedSuit(1) && !g.invertedSuit(0))
+        val orange1 = setOf(1 to 1)
+        val orange3 = setOf(1 to 3)
+        val red3 = setOf(0 to 3)
+        // Discarding the Orange card that is next plays it: fine. Discarding another one would be a misplay.
+        assertEquals(null, g.discardWarning(orange1))
+        assert(g.discardWarning(orange3)!!.contains("plays it"))
+        // Playing an Orange card discards it: the website never warns about unplayable ones, we warn about losing a good one.
+        assertEquals(null, g.playWarning(orange3))
+        assert(g.playWarning(orange1)!!.contains("discards it"))
+        assert(g.playWarning(red3)!!.contains("cannot be played"))
+        assertEquals(null, g.playWarning(setOf(0 to 1)))
+        assert(g.discardWarning(setOf(0 to 1))!!.contains("played right now"))
+        // The Orange card is not marked as playable, because the way to play it is to discard it.
+        assert(!g.isPlayable(live.hanab.client.game.Card(order = 0, suit = 1, rank = 1, possible = orange1)))
+    }
+
     @Test fun colorMuteOffersNoColourClues() {
         val g = twoSuits(live.hanab.client.game.VariantRules(clueColorsOverride = emptyList()), "Color Mute (2 Suits)")
         assertEquals(emptyList<String>(), g.clueColors)

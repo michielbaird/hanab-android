@@ -289,12 +289,20 @@ mod tests {
     fn play_scripted(variant: &str, players: usize, seed: u64, check_rules: bool) -> Result<Value, String> {
         let config = format!(r#"{{"variant":{variant:?},"players":{players},"convention":"HGroup1","seed":{seed},"paceMs":0}}"#);
         let h = start(VARIANTS, SUITS, &config)?;
-        let result = std::panic::catch_unwind(|| scripted_game(h, players, check_rules)).unwrap_or_else(|_| Err("panic".into()));
+        // The rank clues the variant has (all of them unless it lists some); a bot giving another one is a failure.
+        let all: Vec<Value> = serde_json::from_str(VARIANTS).unwrap();
+        let ranks: Vec<i64> = all
+            .iter()
+            .find(|v| v["name"] == variant)
+            .and_then(|v| v["clueRanks"].as_array())
+            .map(|r| r.iter().filter_map(Value::as_i64).collect())
+            .unwrap_or_default();
+        let result = std::panic::catch_unwind(|| scripted_game(h, players, check_rules, &ranks)).unwrap_or_else(|_| Err("panic".into()));
         let _ = tables().lock().unwrap().remove(&h);
         result
     }
 
-    fn scripted_game(h: i64, players: usize, check_rules: bool) -> Result<Value, String> {
+    fn scripted_game(h: i64, players: usize, check_rules: bool, ranks: &[i64]) -> Result<Value, String> {
         let wait = |what: &str| -> Result<Value, String> {
             let out = tables().lock().unwrap().get(&h).map(|t| Arc::clone(&t.out)).ok_or("gone")?;
             let msg = out.pop(Duration::from_secs(60)).ok_or_else(|| {
@@ -374,6 +382,11 @@ mod tests {
                     let a = &m["data"]["action"];
                     match a["type"].as_str().unwrap() {
                         "status" => clues = a["clues"].as_i64().unwrap(),
+                        "clue" if a["giver"] != me && a["clue"]["type"] == 1 && !ranks.is_empty()
+                            && !ranks.contains(&a["clue"]["value"].as_i64().unwrap_or(0)) =>
+                        {
+                            return Err(format!("a bot gave the rank clue {}, which the variant does not have", a["clue"]["value"]));
+                        }
                         "draw" if a["playerIndex"] == me => mine.push(a["order"].as_i64().unwrap()),
                         "play" | "discard" if a["playerIndex"] == me => mine.retain(|&o| o != a["order"].as_i64().unwrap()),
                         "gameOver" => {}
@@ -581,17 +594,16 @@ mod tests {
     /// The variants the app offers offline (the same rule as the picker: the app can show them and the bots can play them).
     /// The keys of a variant in variants.json that the app plays: its name and suits, and the special rules it models
     /// (Rainbow-Ones, White-Ones, critical ranks, scarce ones, Clue Starved). Keep this with `Variants.kt`.
-    const MODELLED_KEYS: [&str; 10] = [
+    const MODELLED_KEYS: [&str; 14] = [
         "id", "newID", "name", "suits", "specialRank", "specialRankAllClueColors", "specialRankNoClueColors", "criticalRank",
-        "scarceOnes", "clueStarved",
+        "scarceOnes", "clueStarved", "clueRanks", "specialRankAllClueRanks", "specialRankNoClueRanks", "specialRankDeceptive",
     ];
 
     fn offered_variants() -> Vec<String> {
         let all: Vec<Value> = serde_json::from_str(VARIANTS).unwrap();
         let suits: Vec<Value> = serde_json::from_str(SUITS).unwrap();
         let known: Vec<&str> = suits.iter().map(|s| s["name"].as_str().unwrap()).collect();
-        let unusable: Vec<&str> =
-            suits.iter().filter(|s| s["inverted"] == true).map(|s| s["name"].as_str().unwrap()).collect();
+        let unusable: Vec<&str> = Vec::new();
         let bot_no = [
             "Blind", "Mute", "Ambiguous", "Dual-Color", "Synesthesia", "Mix", "Funnels", "Chimneys", "Matryoshka",
             "Alternating", "Odds", "Cow", "Duck", "Reversed", "Throw", "Up or Down", "Sudoku",
@@ -607,6 +619,43 @@ mod tests {
             })
             .map(|v| v["name"].as_str().unwrap().to_string())
             .collect()
+    }
+
+    /// Plays variants the app does not offer yet to see whether the bots cope: `PROBE_KEYS=clueRanks` adds those keys
+    /// to the ones allowed, `PROBE_NAME` picks variants by name, `PROBE_STEP` takes every n-th. Prints the failures.
+    /// Run with `--ignored --nocapture`.
+    #[test]
+    #[ignore]
+    fn probe_unoffered_variants() {
+        let all: Vec<Value> = serde_json::from_str(VARIANTS).unwrap();
+        let extra: Vec<String> = std::env::var("PROBE_KEYS").unwrap_or_default().split(',').map(str::to_string).collect();
+        let step: usize = std::env::var("PROBE_STEP").ok().and_then(|v| v.parse().ok()).unwrap_or(1);
+        let name_part = std::env::var("PROBE_NAME").unwrap_or_default();
+        let bot_no = [
+            "Blind", "Mute", "Ambiguous", "Dual-Color", "Synesthesia", "Mix", "Funnels", "Chimneys", "Matryoshka",
+            "Alternating", "Odds", "Cow", "Duck", "Reversed", "Throw", "Up or Down", "Sudoku",
+        ];
+        let mut failures = Vec::new();
+        let mut played = 0;
+        for (i, v) in all.iter().enumerate() {
+            let name = v["name"].as_str().unwrap();
+            let keys_ok = v.as_object().unwrap().keys().all(|k| MODELLED_KEYS.contains(&k.as_str()) || extra.contains(k));
+            if !keys_ok || i % step != 0 || !name.contains(&name_part) || bot_no.iter().any(|b| name.contains(b)) {
+                continue;
+            }
+            let players = 2 + played % 3;
+            played += 1;
+            match play_scripted(name, players, played as u64, false) {
+                Ok(_) => eprintln!("ok   {name} ({players}p)"),
+                Err(e) => {
+                    eprintln!("FAIL {name} ({players}p): {e}");
+                    failures.push(format!("{name} ({players}p): {e}"));
+                }
+            }
+        }
+        eprintln!("played {played}, {} failed", failures.len());
+        assert!(failures.is_empty(), "{}", failures.join("
+"));
     }
 
     /// Every offered variant at 2 and 3 players (`SWEEP_PLAYERS` picks the sizes) with a few seeds, printing each result
@@ -683,11 +732,7 @@ mod tests {
         let all: Vec<Value> = serde_json::from_str(VARIANTS).unwrap();
         let suits: Vec<Value> = serde_json::from_str(SUITS).unwrap();
         let known: Vec<&str> = suits.iter().map(|s| s["name"].as_str().unwrap()).collect();
-        let unusable: Vec<&str> = suits
-            .iter()
-            .filter(|s| s["inverted"] == true)
-            .map(|s| s["name"].as_str().unwrap())
-            .collect();
+        let unusable: Vec<&str> = Vec::new();
         let bot_no = [
             "Blind", "Mute", "Ambiguous", "Dual-Color", "Synesthesia", "Mix", "Funnels", "Chimneys", "Matryoshka",
             "Alternating", "Odds", "Cow", "Duck", "Reversed", "Throw", "Up or Down", "Sudoku",
