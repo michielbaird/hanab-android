@@ -93,20 +93,23 @@ data class GameState(
     val suits: List<String>,
     /** Clue behaviour per suit; defaults to plain suits (touched by their own colour and by ranks). */
     val suitInfos: List<SuitInfo> = suits.map { SuitInfo(it) },
+    /** The variant's own rules (special ranks, copy counts, clue starved). */
+    val rules: VariantRules = VariantRules(),
     val cards: Map<Int, Card> = emptyMap(),
     /** Card orders per player, newest card first. */
     val hands: List<List<Int>> = playerNames.map { emptyList() },
     /** Highest rank played per suit (0 = nothing played). */
     val stacks: List<Int> = suits.map { 0 },
     val discards: List<Int> = emptyList(),
-    val clues: Int = 8,
+    /** Clues as the server counts them: at twice their value in a Clue Starved variant (see [clueCost]). */
+    val clues: Int = if (rules.clueStarved) 16 else 8,
     val strikes: Int = 0,
     val score: Int = 0,
     val maxScore: Int = suits.size * 5,
     val turn: Int = 0,
     val currentPlayer: Int = 0,
     val cardsDrawn: Int = 0,
-    val deckSize: Int = suitInfos.map { if (it.oneOfEach) 5 else 10 }.sum(),
+    val deckSize: Int = deckCards(suitInfos, rules),
     val phase: Phase = Phase.Playing,
     val log: List<LogLine> = emptyList(),
     /** Our private notes, keyed by card order. */
@@ -147,7 +150,19 @@ data class GameState(
     val othersInTurnOrder: List<Int> get() = (1 until numPlayers).map { (ourIndex + it) % numPlayers }
 
     /** Number of cards in the whole deck (the last one, by order, is what a bottom-deck blind play plays). */
-    val totalCards: Int get() = suitInfos.map { if (it.oneOfEach) 5 else 10 }.sum()
+    val totalCards: Int get() = deckCards(suitInfos, rules)
+
+    /** The most clues you can hold, in the server's counting (see [clues]). */
+    val maxClues: Int get() = if (rules.clueStarved) 16 else 8
+
+    /** What giving a clue costs, in the server's counting. */
+    val clueCost: Int get() = if (rules.clueStarved) 2 else 1
+
+    /** Whether a clue can be given now. */
+    val canClue: Boolean get() = clues >= clueCost
+
+    /** The clues to show: half clues count in Clue Starved variants (7.5). */
+    val cluesShown: String get() = if (rules.clueStarved) (clues / 2).toString() + if (clues % 2 == 1) ".5" else "" else "$clues"
 
     /** With the "bottom-deck blind play" option, the last card may be played blind on your turn. */
     val deckPlayable: Boolean get() = options.deckPlays && deckSize == 1 && ourTurn
@@ -189,11 +204,16 @@ data class GameState(
         suits.indices.flatMap { s -> (1..5).map { r -> s to r } }.toSet()
     }
 
-    /** Does a colour clue (index into [clueColors]) touch a card of this suit? */
-    fun touchesColor(suit: Int, colorIdx: Int): Boolean {
+    /** Does a colour clue (index into [clueColors]) touch a card of this suit and rank? */
+    fun touchesColor(suit: Int, rank: Int, colorIdx: Int): Boolean {
         val info = suitInfos.getOrNull(suit) ?: return false
         if (info.allColors) return true
         if (info.noColors) return false
+        // Rainbow-Ones and White-Ones: the special rank is touched by every colour, or by none.
+        if (rank == rules.specialRank) {
+            if (rules.rankTouchedByAllColors) return true
+            if (rules.rankTouchedByNoColors) return false
+        }
         return clueColors.getOrNull(colorIdx) in info.colors
     }
 
@@ -258,7 +278,7 @@ data class GameState(
     fun replayTo(k: Int): GameState {
         val blank = GameState(
             tableID, playerNames, ourIndex, spectating, variantName, suits,
-            suitInfos = suitInfos, options = options, characters = characters,
+            suitInfos = suitInfos, rules = rules, options = options, characters = characters,
         )
         val past = blank.applyAll(actions.take(k)).copy(actions = actions, notes = notes, allNotes = allNotes, readOnly = true)
         return if (revealAll) past.withIdentities(identities) else past
@@ -327,7 +347,7 @@ data class GameState(
                         val hit = o in touched
                         // Keep identities that agree with whether this card was touched.
                         val kept = c.possible.filter { (s, r) ->
-                            (if (isColor) touchesColor(s, value) else touchesRank(s, r, value)) == hit
+                            (if (isColor) touchesColor(s, r, value) else touchesRank(s, r, value)) == hit
                         }.toSet()
                         c.copy(possible = kept.ifEmpty { c.possible }, clued = c.clued || hit, clueApplied = true)
                     }
@@ -438,9 +458,8 @@ data class GameState(
             .groupingBy { it.suit to it.rank }.eachCount()
     }
 
-    /** Copies of a card in the deck: 3/2/2/2/1 by rank, or 1 for a one-of-each suit (Black). */
-    fun copies(suit: Int, rank: Int): Int =
-        if (suitInfos.getOrNull(suit)?.oneOfEach == true) 1 else when (rank) { 1 -> 3; 5 -> 1; else -> 2 }
+    /** Copies of a card in the deck (see [copiesOf]). */
+    fun copies(suit: Int, rank: Int): Int = copiesOf(suitInfos.getOrNull(suit), rank, rules)
 
     /**
      * A (suit, rank) is dead if it is already played, or if every copy of a lower rank in that suit
@@ -471,6 +490,20 @@ data class GameState(
 
     companion object {
         fun totalCards(numSuits: Int) = numSuits * 10
+
+        /**
+         * Copies of a card in the deck: 3/2/2/2/1 by rank; 1 for a one-of-each suit (Black) or the variant's critical
+         * rank; 2 for the ones when they are scarce.
+         */
+        fun copiesOf(suit: SuitInfo?, rank: Int, rules: VariantRules): Int = when {
+            suit?.oneOfEach == true || rank == rules.criticalRank -> 1
+            rank == 1 && rules.scarceOnes -> 2
+            else -> when (rank) { 1 -> 3; 5 -> 1; else -> 2 }
+        }
+
+        /** Cards in the whole deck. */
+        fun deckCards(suitInfos: List<SuitInfo>, rules: VariantRules): Int =
+            suitInfos.sumOf { suit -> (1..5).sumOf { rank -> copiesOf(suit, rank, rules) } }
     }
 }
 

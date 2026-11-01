@@ -48,34 +48,7 @@ fun TableForm(
     Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         OutlinedTextField(value = name, onValueChange = onName, label = { Text("Name") }, singleLine = true)
 
-        Text("Variant", style = MaterialTheme.typography.labelMedium)
-        FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            Variants.quick.forEach { v ->
-                FilterChip(selected = opts.variantName == v, onClick = { onOpts(opts.copy(variantName = v)) }, label = { Text(v) })
-            }
-        }
-        var query by remember { mutableStateOf("") }
-        OutlinedTextField(
-            value = query,
-            onValueChange = { query = it },
-            label = { Text(if (opts.variantName in Variants.quick) "Search other variants" else "Selected: ${opts.variantName}") },
-            singleLine = true,
-        )
-        if (query.length >= 2) {
-            val matches = remember(query) {
-                Variants.allSupported().filter { it.contains(query, ignoreCase = true) }.take(8)
-            }
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                matches.forEach { v ->
-                    FilterChip(
-                        selected = opts.variantName == v,
-                        onClick = { onOpts(opts.copy(variantName = v)); query = "" },
-                        label = { Text(v) },
-                    )
-                }
-            }
-            if (matches.isEmpty()) Text("No supported variant matches.", style = MaterialTheme.typography.bodySmall)
-        }
+        VariantChooser(opts.variantName, Variants.allSupported()) { onOpts(opts.copy(variantName = it)) }
 
         Text("Max players", style = MaterialTheme.typography.labelMedium)
         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {

@@ -85,7 +85,10 @@ fn identity_json(id: Option<Identity>) -> (i64, i64) {
 
 fn status(game: &Game) -> Value {
     let s = &game.state;
-    json!({"type": "status", "clues": s.clue_tokens, "score": s.score(), "maxScore": s.max_score()})
+    // In a Clue Starved game the server counts clues at twice their value (a clue costs 2, a discard gives 1, up to
+    // 16), which is how the app reads them too.
+    let clues = if s.variant.clue_starved { s.clue_tokens * 2 + usize::from(s.half_clue_token) } else { s.clue_tokens };
+    json!({"type": "status", "clues": clues, "score": s.score(), "maxScore": s.max_score()})
 }
 
 struct Table<'a> {

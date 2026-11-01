@@ -334,7 +334,7 @@ mod tests {
         // Rules are enforced: no discarding at 8 clues, and no clue to yourself. Probed on the first own turn.
         let mut probe = check_rules;
         let probe_rules = |mine: &Vec<i64>, clues: i64| -> Result<(), String> {
-            if clues == 8 {
+            if clues >= 8 {
                 send(h, "action", json!({"tableID": 1, "type": 1, "target": mine[0], "value": 0}));
                 expect("a warning", "warning")?;
             }
@@ -386,7 +386,7 @@ mod tests {
                             if mine.is_empty() {
                                 return Err("the human has no cards but it is their turn".into());
                             }
-                            if clues == 8 {
+                            if clues >= 8 {
                                 send(h, "action", json!({"tableID": 1, "type": 3, "target": other, "value": value}));
                             } else {
                                 send(h, "action", json!({"tableID": 1, "type": 1, "target": mine[0], "value": 0}));
@@ -437,6 +437,24 @@ mod tests {
         let list: Value = serde_json::from_str(next().strip_prefix("gameActionList ").unwrap()).unwrap();
         assert_eq!(list["list"].as_array().unwrap().len(), actions.len());
         tx.send(Event::Close).unwrap();
+    }
+
+    /// The variants with special rules that the app plays: Rainbow-Ones, White-Ones, scarce ones, critical fours and
+    /// Clue Starved all play through, and Clue Starved reports clues at twice their value, as the server does.
+    #[test]
+    fn plays_the_variants_with_special_rules() {
+        for name in ["Rainbow-Ones (5 Suits)", "White-Ones (5 Suits)", "Scarce Ones (5 Suits)", "Critical Fours (5 Suits)"] {
+            let record = play_scripted(name, 3, 1, false).unwrap_or_else(|e| panic!("{name}: {e}"));
+            let max = record["actions"].as_array().unwrap().iter().filter(|a| a["type"] == "status").map(|a| a["clues"].as_i64().unwrap()).max();
+            assert!(max.unwrap() <= 8, "{name}: clues {max:?}");
+        }
+        let record = play_scripted("Clue Starved (5 Suits)", 3, 1, false).unwrap();
+        let counts: Vec<i64> =
+            record["actions"].as_array().unwrap().iter().filter(|a| a["type"] == "status").map(|a| a["clues"].as_i64().unwrap()).collect();
+        assert!(counts.iter().all(|&c| (0..=16).contains(&c)), "{counts:?}");
+        assert!(counts.iter().any(|&c| c > 8), "clues should be counted at twice their value: {counts:?}");
+        // A clue costs two, so the count drops by two when one is given.
+        assert!(counts.windows(2).any(|w| w[1] == w[0] - 2), "{counts:?}");
     }
 
     /// The table deals what the website dealt for the same seed: the cards the human can see are the real ones.
@@ -561,6 +579,13 @@ mod tests {
     }
 
     /// The variants the app offers offline (the same rule as the picker: the app can show them and the bots can play them).
+    /// The keys of a variant in variants.json that the app plays: its name and suits, and the special rules it models
+    /// (Rainbow-Ones, White-Ones, critical ranks, scarce ones, Clue Starved). Keep this with `Variants.kt`.
+    const MODELLED_KEYS: [&str; 10] = [
+        "id", "newID", "name", "suits", "specialRank", "specialRankAllClueColors", "specialRankNoClueColors", "criticalRank",
+        "scarceOnes", "clueStarved",
+    ];
+
     fn offered_variants() -> Vec<String> {
         let all: Vec<Value> = serde_json::from_str(VARIANTS).unwrap();
         let suits: Vec<Value> = serde_json::from_str(SUITS).unwrap();
@@ -573,7 +598,7 @@ mod tests {
         ];
         all.iter()
             .filter(|v| {
-                let plain = v.as_object().unwrap().keys().all(|k| ["id", "newID", "name", "suits"].contains(&k.as_str()));
+                let plain = v.as_object().unwrap().keys().all(|k| MODELLED_KEYS.contains(&k.as_str()));
                 let suits_ok = v["suits"].as_array().unwrap().iter().all(|s| {
                     let s = s.as_str().unwrap();
                     known.contains(&s) && !unusable.contains(&s)
@@ -584,16 +609,35 @@ mod tests {
             .collect()
     }
 
-    /// Every offered variant at 2 and 3 players with a few seeds, printing each failure and (above it) the panic that
-    /// caused it. Quick enough to run often; `SWEEP_SEEDS` sets how many seeds (default 2). Run with `--ignored --nocapture`.
+    /// Every offered variant at 2 and 3 players (`SWEEP_PLAYERS` picks the sizes) with a few seeds, printing each result
+    /// and, at the end, every failure. `SWEEP_SEEDS` sets how many seeds (default 2) and `SWEEP_FROM` where to start.
+    /// Run with `--ignored --nocapture`.
     #[test]
     #[ignore]
     fn sweep_small_tables() {
         let seeds: u64 = std::env::var("SWEEP_SEEDS").ok().and_then(|v| v.parse().ok()).unwrap_or(2);
         let from: usize = std::env::var("SWEEP_FROM").ok().and_then(|v| v.parse().ok()).unwrap_or(0);
+        // The table sizes to play, like SWEEP_PLAYERS=2,3 (the default) or 4.
+        let sizes: Vec<usize> = std::env::var("SWEEP_PLAYERS")
+            .map(|v| v.split(',').filter_map(|p| p.trim().parse().ok()).collect())
+            .unwrap_or_else(|_| vec![2, 3]);
         let mut failures = Vec::new();
+        // SWEEP_SPECIAL=1 plays only the variants with special rules (Rainbow-Ones, Clue Starved, ...).
+        let special_only = std::env::var("SWEEP_SPECIAL").is_ok();
+        let step: usize = std::env::var("SWEEP_STEP").ok().and_then(|v| v.parse().ok()).unwrap_or(1);
+        let all: Vec<Value> = serde_json::from_str(VARIANTS).unwrap();
+        let has_rules = |name: &str| {
+            all.iter().any(|v| v["name"] == name && v.as_object().unwrap().keys().any(|k| !["id", "newID", "name", "suits"].contains(&k.as_str())))
+        };
         for (n, name) in offered_variants().iter().enumerate().skip(from) {
-            for players in [2usize, 3] {
+            if special_only && !has_rules(name) {
+                continue;
+            }
+            // SWEEP_STEP=12 plays every 12th variant only (a sample for slow table sizes).
+            if step > 1 && n % step != 0 {
+                continue;
+            }
+            for &players in &sizes {
                 for seed in 1..=seeds {
                     let started = std::time::Instant::now();
                     let result = play_scripted(name, players, seed, false);
@@ -648,7 +692,7 @@ mod tests {
         let mut played = 0;
         for v in &all {
             let name = v["name"].as_str().unwrap();
-            let plain = v.as_object().unwrap().keys().all(|k| ["id", "newID", "name", "suits"].contains(&k.as_str()));
+            let plain = v.as_object().unwrap().keys().all(|k| MODELLED_KEYS.contains(&k.as_str()));
             let suits_ok = v["suits"].as_array().unwrap().iter().all(|s| {
                 let s = s.as_str().unwrap();
                 known.contains(&s) && !unusable.contains(&s)

@@ -724,6 +724,7 @@ class LobbyViewModel(app: Application) : AndroidViewModel(app) {
             variantName = variantName,
             suits = suits,
             suitInfos = suits.map(Variants::info),
+            rules = Variants.rules(variantName),
         )
         // The special options of this game, and each player's detrimental character if there are any.
         val opts = d["options"] as? JsonObject
