@@ -782,11 +782,11 @@ private fun CluePanel(
                 }
             }
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                (1..5).forEach { r ->
+                g.rules.clueRanks.forEach { r ->
                     val option = ClueChoice.Rank(r)
                     ClueToggle(
                         modifier = Modifier.weight(1f),
-                        label = "$r",
+                        label = g.rankClueLabel(r),
                         color = Color(0xFF455A64),
                         selected = choice == option,
                         enabled = g.canClue && (g.options.emptyClues || touches(option)),
@@ -816,7 +816,7 @@ private fun CluePanel(
                 } ?: 0
                 val what = when (choice) {
                     is ClueChoice.Color -> g.clueColors.getOrElse(choice.color) { "?" }
-                    is ClueChoice.Rank -> "${choice.rank}"
+                    is ClueChoice.Rank -> g.rankClueLabel(choice.rank)
                     null -> null
                 }
                 Text(
@@ -1296,7 +1296,8 @@ private fun androidx.compose.foundation.layout.BoxScope.ClueBubbleFor(g: GameSta
         contentAlignment = Alignment.Center,
     ) {
         if (mark.rank != null) {
-            Text("${mark.rank}", fontSize = 14.sp, fontWeight = FontWeight.ExtraBold, color = Color.White)
+            val label = mark.rankLabel ?: "${mark.rank}"
+            Text(label, fontSize = if (label.length > 1) 9.sp else 14.sp, fontWeight = FontWeight.ExtraBold, color = Color.White)
         }
         if (mark.color != null) Pip(mark.color, 14.dp)
     }

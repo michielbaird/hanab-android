@@ -42,6 +42,7 @@ data class SuitInfo(
  *  criticalRank   every card of that rank has a single copy (Critical Four)
  *  scarceOnes     two copies of each one instead of three
  *  clueStarved    discards give half a clue; the server counts clues at twice their value (a clue costs 2, up to 16)
+ *  clueRanks, rankTouchedBy..., oddsAndEvens, funnels, chimneys   which rank clues exist and what they touch
  */
 data class VariantRules(
     val specialRank: Int? = null,
@@ -50,7 +51,23 @@ data class VariantRules(
     val criticalRank: Int? = null,
     val scarceOnes: Boolean = false,
     val clueStarved: Boolean = false,
-)
+    /** The rank clues on offer, by clue value: 1 to 5, except Pink-Ones has no 1 and Odds and Evens has just 1 and 2. */
+    val clueRanks: List<Int> = listOf(1, 2, 3, 4, 5),
+    /** Pink-Ones: the special rank is touched by every rank clue. Brown-Ones: by none. Deceptive-Ones: by one per suit. */
+    val rankTouchedByAllRanks: Boolean = false,
+    val rankTouchedByNoRanks: Boolean = false,
+    val rankDeceptive: Boolean = false,
+    /** Rank clues are "odds" (1) and "evens" (2). */
+    val oddsAndEvens: Boolean = false,
+    /** A rank clue also touches every lower rank (Funnels) or every higher rank (Chimneys). */
+    val funnels: Boolean = false,
+    val chimneys: Boolean = false,
+) {
+    /** Whether the bot library plays this variant: it knows none of the rank-clue rules above (it would give clues that do not exist). */
+    val botCanPlay: Boolean
+        get() = clueRanks == listOf(1, 2, 3, 4, 5) && !rankTouchedByAllRanks && !rankTouchedByNoRanks && !rankDeceptive &&
+            !oddsAndEvens && !funnels && !chimneys
+}
 
 /** Suits and variants from the bundled copies of hanab.live's suits.json and variants.json. */
 object Variants {
@@ -66,6 +83,7 @@ object Variants {
     private val plainKeys = setOf("id", "newID", "name", "suits")
     private val modelledKeys = plainKeys + setOf(
         "specialRank", "specialRankAllClueColors", "specialRankNoClueColors", "criticalRank", "scarceOnes", "clueStarved",
+        "clueRanks", "specialRankAllClueRanks", "specialRankNoClueRanks", "specialRankDeceptive", "oddsAndEvens", "funnels", "chimneys",
     )
     private var rulesByVariant: Map<String, VariantRules> = emptyMap()
 
@@ -134,6 +152,14 @@ object Variants {
                     criticalRank = (o["criticalRank"] as? JsonPrimitive)?.content?.toIntOrNull(),
                     scarceOnes = o.flag("scarceOnes"),
                     clueStarved = o.flag("clueStarved"),
+                    clueRanks = (o["clueRanks"] as? JsonArray)?.mapNotNull { (it as? JsonPrimitive)?.content?.toIntOrNull() }
+                        ?: listOf(1, 2, 3, 4, 5),
+                    rankTouchedByAllRanks = o.flag("specialRankAllClueRanks"),
+                    rankTouchedByNoRanks = o.flag("specialRankNoClueRanks"),
+                    rankDeceptive = o.flag("specialRankDeceptive"),
+                    oddsAndEvens = o.flag("oddsAndEvens"),
+                    funnels = o.flag("funnels"),
+                    chimneys = o.flag("chimneys"),
                 )
             }
         }
@@ -189,7 +215,8 @@ object Variants {
     )
 
     /** What we can both show and the bots can play: the variants offered for offline games. */
-    fun botSupported(): List<String> = supportedNames.filter { n -> botUnsupported.none { n.contains(it) } }
+    fun botSupported(): List<String> =
+        supportedNames.filter { n -> botUnsupported.none { n.contains(it) } && rules(n).botCanPlay }
 
     /**
      * The variants in [among] that match [query], best first. Case, hyphens, "&" and brackets do not matter and every
