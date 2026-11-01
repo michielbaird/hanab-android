@@ -34,11 +34,11 @@ class VariantsTest {
 
     @Test fun variantsWithSpecialRulesOrUnmodelledSuitsAreNot() {
         assertFalse(Variants.isSupported("Not a real variant"))
-        // Anything with an Orange suit or one of the rules we do not model is out.
+        // Anything with one of the rules we do not model is out.
         assertFalse(Variants.isSupported("Up or Down (5 Suits)"))
         assertFalse(Variants.isSupported("Sudoku (5 Suits)"))
         assertFalse(Variants.isSupported("Throw It in a Hole (5 Suits)"))
-        assertFalse(Variants.isSupported("Orange (5 Suits)"))
+        assertTrue(Variants.isSupported("Orange (5 Suits)"))
     }
 
     @Test fun prismAndSynesthesiaAreModelled() {
@@ -92,8 +92,11 @@ class VariantsTest {
         assertTrue(Variants.rules("Totally Blind (5 Suits)").let { it.colorCluesTouchNothing && it.rankCluesTouchNothing })
         assertEquals(emptyList<String>(), Variants.rules("Color Mute (5 Suits)").clueColorsOverride)
         assertTrue(Variants.rules("Alternating Clues (5 Suits)").alternatingClues)
-        assertFalse("Orange suits are not modelled yet", Variants.isSupported("Alternating Clues & Orange (5 Suits)"))
-        assertEquals(2025, Variants.allSupported().size)
+        assertTrue(Variants.isSupported("Alternating Clues & Orange (5 Suits)"))
+        assertFalse("the bot does not play Orange", "Orange (5 Suits)" in Variants.botSupported())
+        assertTrue(Variants.info("Orange").inverted && Variants.info("Dark Orange").inverted)
+        assertEquals("pips/orange.svg", Variants.pipFile("Orange"))
+        assertEquals(2275,Variants.allSupported().size)
     }
 
     @Test fun searchFindsEveryVariantWhoseNameHasTheWords() {

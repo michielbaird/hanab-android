@@ -667,25 +667,21 @@ private fun GameBoard(live: GameState, vm: LobbyViewModel, ui: LobbyUiState) {
                     OutlinedButton(
                         onClick = {
                             val ids = g.knowledgeOf(g.ourIndex)[order]?.inferred.orEmpty()
-                            val reason = when {
-                                g.allCritical(ids) -> "${g.describe(ids)} is the last copy of a card you still need. Discard it anyway?"
-                                g.allPlayableNow(ids) -> "${g.describe(ids)} can be played right now. Discard it anyway?"
-                                else -> null
-                            }
-                            if (reason != null) warn = Triple(order, false, reason.replaceFirstChar { it.uppercase() })
+                            val reason = g.discardWarning(ids)
+                            if (reason != null) warn = Triple(order, false, reason)
                             else vm.discard(order)
                             selected = null
                         },
-                        enabled = g.ourTurn && g.clues < g.maxClues,
+                        enabled = g.ourTurn && (g.clues < g.maxClues || g.hasInverted),
                         modifier = Modifier.weight(1f),
                         contentPadding = PaddingValues(horizontal = 8.dp),
                     ) { Text("Discard", maxLines = 1) }
                     Button(
                         onClick = {
                             val ids = g.knowledgeOf(g.ourIndex)[order]?.inferred.orEmpty()
-                            if (ids.isNotEmpty() && !g.anyPlayableNow(ids)) {
-                                warn = Triple(order, true, "${g.describe(ids).replaceFirstChar { it.uppercase() }} cannot be played right now. Play it anyway?")
-                            } else vm.play(order)
+                            val reason = g.playWarning(ids)
+                            if (reason != null) warn = Triple(order, true, reason)
+                            else vm.play(order)
                             selected = null
                         },
                         enabled = g.ourTurn,

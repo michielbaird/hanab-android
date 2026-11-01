@@ -36,6 +36,8 @@ data class SuitInfo(
     val fillsColorblind: List<Int> = emptyList(),
     /** A prism suit: a card is touched by the clue colour that goes with its rank (1 = the first colour, then round). */
     val prism: Boolean = false,
+    /** Orange: attempting to play a card of the suit discards it, and attempting to discard it plays it. */
+    val inverted: Boolean = false,
 )
 
 /**
@@ -89,7 +91,7 @@ object Variants {
     private var supportedNames: List<String> = emptyList()
     private var namesById: Map<Int, String> = emptyMap()
 
-    /** Suits we cannot model yet (the Orange suit, whose plays and discards swap). */
+    /** Suits we cannot model yet (none at the moment). */
     private val unsupportedSuits = mutableSetOf<String>()
 
     /** Variant keys that are pure metadata, and the special rules we model; any other key is a rule we do not implement. */
@@ -143,8 +145,8 @@ object Variants {
                 o.flag("oneOfEach"),
                 fillsCb,
                 prism = o.flag("prism"),
+                inverted = o.flag("inverted"),
             )
-            if (o.flag("inverted")) unsupportedSuits += name
         }
         suitInfos = infos
 
@@ -215,6 +217,7 @@ object Variants {
             "infinity" -> "omni"
             "emptySet" -> "null"
             "triangle" -> "prism"
+            "unoReverse" -> "orange"
             else -> return null
         }
         return "pips/$file.svg"
@@ -231,7 +234,7 @@ object Variants {
      */
     private val botUnsupported = listOf(
         "Blind", "Mute", "Ambiguous", "Dual-Color", "Synesthesia", "Mix", "Funnels", "Chimneys", "Matryoshka",
-        "Alternating", "Odds", "Cow", "Duck", "Reversed", "Throw", "Up or Down", "Sudoku",
+        "Alternating", "Odds", "Cow", "Duck", "Reversed", "Throw", "Up or Down", "Sudoku", "Orange",
     )
 
     /** What we can both show and the bots can play: the variants offered for offline games. */

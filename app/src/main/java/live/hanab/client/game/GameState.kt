@@ -442,8 +442,44 @@ data class GameState(
     fun name(p: Int) = playerNames.getOrElse(p) { "?" }
     fun cardName(s: Int, r: Int) = if (s < 0 || r < 0) "a card" else "${suits.getOrElse(s) { "?" }} $r"
 
-    /** Playable-now check used for hints in the UI. */
-    fun isPlayable(c: Card) = c.suit in stacks.indices && c.rank == stacks[c.suit] + 1
+    /** Playable-now check used for hints in the UI (an Orange card is not marked: it goes on its stack by being discarded). */
+    fun isPlayable(c: Card) = c.suit in stacks.indices && !invertedSuit(c.suit) && c.rank == stacks[c.suit] + 1
+
+    /** Orange: the server discards a card of this suit when it is played and plays it when it is discarded. */
+    fun invertedSuit(suit: Int) = suitInfos.getOrNull(suit)?.inverted == true
+
+    /** Whether any suit swaps plays and discards: then discarding is allowed even with every clue token. */
+    val hasInverted: Boolean get() = suitInfos.any { it.inverted }
+
+    private fun cap(s: String) = s.replaceFirstChar { it.uppercase() }
+
+    /** What to ask before discarding a card that could be any of [ids], or null if it is fine. Discarding an Orange card plays it. */
+    fun discardWarning(ids: Set<Pair<Int, Int>>): String? {
+        if (ids.isEmpty()) return null
+        if (ids.all { invertedSuit(it.first) }) {
+            return if (ids.any { (s, r) -> r == stacks[s] + 1 }) null
+            else cap("${describe(ids)} is an Orange card, so discarding it plays it, and it cannot be played right now. Discard it anyway?")
+        }
+        if (ids.any { invertedSuit(it.first) }) return null
+        return when {
+            allCritical(ids) -> cap("${describe(ids)} is the last copy of a card you still need. Discard it anyway?")
+            allPlayableNow(ids) -> cap("${describe(ids)} can be played right now. Discard it anyway?")
+            else -> null
+        }
+    }
+
+    /** What to ask before playing a card that could be any of [ids], or null if it is fine. Playing an Orange card discards it. */
+    fun playWarning(ids: Set<Pair<Int, Int>>): String? {
+        if (ids.isEmpty()) return null
+        if (ids.all { invertedSuit(it.first) }) return when {
+            allCritical(ids) -> cap("${describe(ids)} is the last copy of a card you still need, and playing an Orange card discards it. Play it anyway?")
+            allPlayableNow(ids) -> cap("${describe(ids)} can go on its stack, but playing an Orange card discards it. Play it anyway?")
+            else -> null
+        }
+        // An Orange card counts as playable: the website never warns about it.
+        if (ids.any { (s, r) -> invertedSuit(s) || (s in stacks.indices && r == stacks[s] + 1) }) return null
+        return cap("${describe(ids)} cannot be played right now. Play it anyway?")
+    }
 
     /** Every deduction for this position, computed once on first use (see [Deduction]). */
     private val deduced: Map<Int, Set<Pair<Int, Int>>> by lazy {
