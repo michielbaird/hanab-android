@@ -17,3 +17,7 @@ opt-level = 3
 lto = true
 strip = true
 panic = "unwind"
+
+# Tests build the bot too: without this it runs about 15 times slower than in the app.
+[profile.dev.package."*"]
+opt-level = 3
