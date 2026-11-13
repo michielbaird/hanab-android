@@ -1,6 +1,7 @@
 package live.hanab.client
 
 import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.decodeFromJsonElement
 import kotlinx.serialization.json.int
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
@@ -98,6 +99,20 @@ class WireAdapterTest {
         ).single().data!!.jsonObject
         assertEquals("false", pregame["running"]!!.jsonPrimitive.content)
         assertEquals("false", pregame["joined"]!!.jsonPrimitive.content)
+    }
+
+    /** The server marks bots now, so the app does not keep a list of its own. */
+    @Test fun theServerSaysWhoIsABot() {
+        val users = inbound(
+            "userList",
+            """{"users":[{"userId":1,"username":"potato_bot_1","activity":{"type":"lobby"},"hGroupConventions":false,"bot":true,"inactive":false},{"userId":2,"username":"alice","activity":{"type":"lobby"},"hGroupConventions":false,"bot":false,"inactive":false}]}""",
+        ).single().data as JsonArray
+        val parsed = users.map { HanabJson.decodeFromJsonElement<live.hanab.client.net.User>(it) }
+        assertEquals(listOf(true, false), parsed.map { it.bot })
+        val ui = live.hanab.client.LobbyUiState(users = parsed.associateBy { it.userID })
+        assertTrue(ui.isBot("POTATO_BOT_1"))
+        assertEquals(false, ui.isBot("alice"))
+        assertEquals(listOf("potato_bot_1"), ui.bots.map { it.name })
     }
 
     @Test fun chatKeepsItsRoom() {

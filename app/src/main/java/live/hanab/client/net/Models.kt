@@ -22,6 +22,8 @@ data class User(
     val status: String = "",
     val tableID: Int? = null,
     val inactive: Boolean = false,
+    /** Whether the server says this is a bot (it marks the accounts that sign in as one). */
+    val bot: Boolean = false,
 )
 
 @Serializable

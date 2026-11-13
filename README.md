@@ -40,10 +40,11 @@ Clues, Color / Number / Totally Blind, Color Mute, Cow & Pig, Duck, Throw It in 
 play, has fewer of them: the ones whose clue and play rules the bot knows.
 
 **Bots**
-Built for hosting [scala-bot](https://github.com/will-hanabi-bot/scala-bot): mark a user as a bot in the
-Users tab, then use **Invite bots** in the pregame. The app sets the conventions and fast mode, then
-joins the bot to your table by private message. You can also kick bots and set conventions for all of
-them.
+Built for hosting [scala-bot](https://github.com/will-hanabi-bot/scala-bot): the Users tab lists the bots the server marks
+as bots first, and **Invite bots** in the pregame lists the ones that are online. The app asks a bot to join by private
+message, and once it is seated sets its conventions with `/setall` in the table chat (a bot can be at several tables at once,
+so that sets them for this game; the fast mode follows from the bot's answer). You can also kick bots and set conventions for
+all of them. Not every bot plays at several tables, which is why each invite shows how it is going.
 
 **Analysis**
 **Analyze** (at the end of a game, and next to each game in a profile's history or in the offline

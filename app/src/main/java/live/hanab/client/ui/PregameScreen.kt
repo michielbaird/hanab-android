@@ -28,7 +28,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
-import live.hanab.client.BotStore
 import live.hanab.client.LobbyUiState
 import live.hanab.client.LobbyViewModel
 
@@ -41,10 +40,11 @@ fun PregameScreen(ui: LobbyUiState, vm: LobbyViewModel) {
     var showEdit by remember { mutableStateOf(false) }
 
     val players = table?.players.orEmpty()
-    val botsAtTable = players.filter { BotStore.isBot(it) }
-    // Your marked bots that are online and not yet at this table.
+    val botsAtTable = players.filter { ui.isBot(it) }
+    // The bots that are online and not yet at this table (one that is at another table may still come: a bot can play at
+    // several, if it supports that).
     val inviteable = ui.users.values
-        .filter { u -> BotStore.isBot(u.name) && players.none { it.equals(u.name, true) } }
+        .filter { u -> u.bot && players.none { it.equals(u.name, true) } }
         .sortedBy { it.name.lowercase() }
 
     androidx.compose.runtime.CompositionLocalProvider(
@@ -67,11 +67,11 @@ fun PregameScreen(ui: LobbyUiState, vm: LobbyViewModel) {
                 players.forEach { p ->
                     Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.heightIn(min = 30.dp)) {
                         Text(
-                            p + if (BotStore.isBot(p)) "  (bot)" else "",
+                            p + if (ui.isBot(p)) "  (bot)" else "",
                             style = MaterialTheme.typography.titleSmall,
                             modifier = Modifier.weight(1f),
                         )
-                        if (BotStore.isBot(p)) TextButton(onClick = { vm.kickBot(p) }, contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp)) { Text("Kick") }
+                        if (ui.isBot(p)) TextButton(onClick = { vm.kickBot(p) }, contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp)) { Text("Kick") }
                     }
                 }
                 if (botsAtTable.isNotEmpty()) {
@@ -80,7 +80,7 @@ fun PregameScreen(ui: LobbyUiState, vm: LobbyViewModel) {
                         OutlinedButton(onClick = vm::leaveAllBots) { Text("Kick all bots") }
                     }
                 }
-                if (BotStore.bots.isNotEmpty()) {
+                if (ui.bots.isNotEmpty()) {
                     OutlinedButton(onClick = { showInvite = true }, modifier = Modifier.fillMaxWidth()) { Text("Invite bots") }
                     // Progress / errors of invites in flight, e.g. "Joining..." or the bot's own refusal.
                     ui.botStatus.forEach { (bot, text) ->
@@ -152,8 +152,8 @@ fun PregameScreen(ui: LobbyUiState, vm: LobbyViewModel) {
  * Where a bot is, for the invite list. The server sends a status number (0 lobby, 1 pregame, 2 playing,
  * 3 spectating, 4 replay, 5 shared replay) and tableID 0, not null, for someone in the lobby.
  */
-private fun botWhere(u: live.hanab.client.net.User) = when (u.status.trim().toIntOrNull()) {
-    null, 0 -> "Free"
-    4, 5 -> "In a replay"
+private fun botWhere(u: live.hanab.client.net.User) = when (u.status.trim()) {
+    "0", "Lobby" -> "Free"
+    "4", "5", "Replay", "Shared Replay" -> "In a replay"
     else -> "At a table"
 }
