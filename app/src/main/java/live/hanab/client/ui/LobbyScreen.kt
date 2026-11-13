@@ -23,6 +23,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.FilterChip
+import live.hanab.client.Favorites
 import live.hanab.client.game.Variants
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
@@ -260,13 +261,13 @@ private fun ChatTab(ui: LobbyUiState, vm: LobbyViewModel) {
 private fun UsersTab(ui: LobbyUiState, onProfile: (String) -> Unit, onPm: (String) -> Unit) {
     var menuFor by remember { mutableStateOf<String?>(null) }
     val onlineNames = ui.users.values.map { it.name.lowercase() }.toSet()
-    // The bots the server marks first, then everyone else by name.
-    val users = ui.users.values.sortedWith(compareBy({ !it.bot }, { it.name.lowercase() }))
+    // Your favorites first, then the bots the server marks, then everyone else by name.
+    val users = ui.users.values.sortedWith(compareBy({ !Favorites.isFavorite(it.name) }, { !it.bot }, { it.name.lowercase() }))
     LazyColumn(Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
         items(users, key = { it.userID }) { u ->
             val bot = u.bot
             Column(Modifier.fillMaxWidth().clickable { menuFor = u.name }.padding(vertical = 8.dp)) {
-                Text(u.name + if (bot) "  [BOT]" else "")
+                Text((if (Favorites.isFavorite(u.name)) "★ " else "") + u.name + if (bot) "  [BOT]" else "")
                 Text(
                     statusLabel(u, ui),
                     style = MaterialTheme.typography.bodySmall,

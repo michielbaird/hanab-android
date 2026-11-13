@@ -41,7 +41,8 @@ play, has fewer of them: the ones whose clue and play rules the bot knows.
 
 **Bots**
 Built for hosting [scala-bot](https://github.com/will-hanabi-bot/scala-bot): the Users tab lists the bots the server marks
-as bots first, and **Invite bots** in the pregame lists the ones that are online. The app asks a bot to join by private
+as bots first, and **Invite bots** in the pregame lists the ones that are online. Tap a user to add them to your favorites
+(kept on the phone): favorites come first in the Users tab, and favorite bots first in the invite list. The app asks a bot to join by private
 message, and once it is seated sets its conventions with `/setall` in the table chat (a bot can be at several tables at once,
 so that sets them for this game; the fast mode follows from the bot's answer). You can also kick bots and set conventions for
 all of them. Not every bot plays at several tables, which is why each invite shows how it is going.

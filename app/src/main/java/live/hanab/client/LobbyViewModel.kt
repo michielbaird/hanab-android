@@ -116,6 +116,7 @@ class LobbyViewModel(app: Application) : AndroidViewModel(app) {
         PipStore.init(app)
         AppSettings.load(app)
         BotStore.load(app)
+        Favorites.load(app)
         live.hanab.client.game.Characters.load(app)
         GameSounds.init(app)
         KeepAliveService.onExpired = ::onBackgroundTimeout

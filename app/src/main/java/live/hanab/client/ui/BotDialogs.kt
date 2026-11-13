@@ -33,6 +33,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import live.hanab.client.BotStore
+import live.hanab.client.Favorites
 import live.hanab.client.LobbyUiState
 import live.hanab.client.LobbyViewModel
 
@@ -120,6 +121,10 @@ fun UserMenuDialog(name: String, online: Boolean, onProfile: () -> Unit, onMessa
             Column {
                 TextButton(onClick = { onProfile(); onDismiss() }, Modifier.fillMaxWidth()) { Text("View profile") }
                 if (online) TextButton(onClick = { onMessage(); onDismiss() }, Modifier.fillMaxWidth()) { Text("Send message") }
+                // Favorites (users or bots) come first in the Users tab, and favorite bots first when inviting bots.
+                TextButton(onClick = { Favorites.toggle(name); onDismiss() }, Modifier.fillMaxWidth()) {
+                    Text(if (Favorites.isFavorite(name)) "Remove from favorites" else "Add to favorites")
+                }
             }
         },
         confirmButton = { TextButton(onClick = onDismiss) { Text("Close") } },

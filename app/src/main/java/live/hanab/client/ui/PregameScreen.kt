@@ -28,6 +28,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
+import live.hanab.client.Favorites
 import live.hanab.client.LobbyUiState
 import live.hanab.client.LobbyViewModel
 
@@ -45,7 +46,8 @@ fun PregameScreen(ui: LobbyUiState, vm: LobbyViewModel) {
     // several, if it supports that).
     val inviteable = ui.users.values
         .filter { u -> u.bot && players.none { it.equals(u.name, true) } }
-        .sortedBy { it.name.lowercase() }
+        // Your favorite bots first.
+        .sortedWith(compareBy({ !Favorites.isFavorite(it.name) }, { it.name.lowercase() }))
 
     androidx.compose.runtime.CompositionLocalProvider(
         androidx.compose.material3.LocalMinimumInteractiveComponentSize provides androidx.compose.ui.unit.Dp.Unspecified,
@@ -113,7 +115,7 @@ fun PregameScreen(ui: LobbyUiState, vm: LobbyViewModel) {
     if (showInvite) {
         InviteBotsDialog(
             choices = inviteable.map { u ->
-                InviteChoice(u.name, ui.botStatus[u.name] ?: botWhere(u))
+                InviteChoice(u.name, (if (Favorites.isFavorite(u.name)) "★ " else "") + (ui.botStatus[u.name] ?: botWhere(u)))
             },
             needsPassword = table?.passwordProtected == true,
             knownPassword = vm.tablePassword,
