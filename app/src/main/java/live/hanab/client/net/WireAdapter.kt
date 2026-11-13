@@ -66,6 +66,12 @@ class WireAdapter(
                 put("replay", m.data.stage == TableStage.Replay)
             }))
         }
+        // A table's new owner also leads its shared replay, so the app takes it as the new leader (it decides from that who may
+        // move everyone's turn).
+        is InTableOwner -> one("replayLeader", buildJsonObject {
+            put("tableID", m.data.tableId.toInt())
+            put("name", m.data.owner.username)
+        })
         // Being booted from a table is the same message as leaving it now.
         is InTableLeft -> one("left", tableRef(m.data))
         is InChat -> one("chat", chat(m.data))
@@ -114,7 +120,7 @@ class WireAdapter(
         // The rest the app has no use for (yet).
         is InUnknown, is InBlocked, is InFriends, is InChatDeleted, is InChatTyping, is InClock, is InConnections,
         is InGameHistoryAdded, is InIdleReset, is InIdleWarning, is InLobbyStatus, is InPause, is InServerShutdown,
-        is InSpectators, is InTableOwner, is InTableRestartDecliners, is InTableSettingsSuggestion, is InTableSuggestion,
+        is InSpectators, is InTableRestartDecliners, is InTableSettingsSuggestion, is InTableSuggestion,
         -> emptyList()
     }
 
