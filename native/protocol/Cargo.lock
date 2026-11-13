@@ -93,9 +93,9 @@ checksum = "175812e0be2bccb6abe50bb8d566126198344f707e304f45c648fd8f2cc0365e"
 
 [[package]]
 name = "cc"
-version = "1.11.1"
+version = "1.11.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4ff2a8126fff0f8c839080d619675a585e61720bb12d2baceae45769fd66f155"
+checksum = "33ef9e3e8154a45c7a95cff4c1299702106ad94062d7bb85fdc5d3a5afd91d45"
 dependencies = [
  "find-msvc-tools",
  "shlex",
@@ -238,7 +238,8 @@ dependencies = [
 [[package]]
 name = "hanabi_protocol"
 version = "0.1.0"
-source = "git+https://github.com/Hanabi-Live/hanabi-live?rev=6ed2acff52b0bfce1739f6e34dd6642f2e4f9338#6ed2acff52b0bfce1739f6e34dd6642f2e4f9338"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5b8d0459921a220f01a5c5abb56d9fdaebe5f0114e230c6b3a1f81049123e1e4"
 dependencies = [
  "anyhow",
  "chrono",

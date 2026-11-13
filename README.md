@@ -151,33 +151,38 @@ The game logic has unit tests (`app/src/test`). The screens have no automated te
 
 ## Keeping up with the website's protocol
 
-hanab.live's server owns every message in its Rust crate `hanabi_protocol` (`server/protocol` in
-[Hanabi-Live/hanabi-live](https://github.com/Hanabi-Live/hanabi-live)), and its own generator turns the crate's JSON Schemas
-into TypeScript. `native/protocol` does the same for the app: it depends on the crate at a pinned commit and writes
-`app/src/main/java/live/hanab/client/protocol/Protocol.kt` (kotlinx.serialization types for every message, a typed
-`Inbound`/`Outbound` for every command, and the website's constants). Like the website's generator it fails closed: a schema
-keyword it does not translate stops it, so a change is never dropped silently. The website's shared test cases at the same
-commit are in `app/src/test/resources/protocol` and `ProtocolFixturesTest` runs them against the types.
+hanab.live's server owns every message in its Rust crate [`hanabi_protocol`](https://crates.io/crates/hanabi_protocol)
+(`server/protocol` in [Hanabi-Live/hanabi-live](https://github.com/Hanabi-Live/hanabi-live)), and its own generator turns the
+crate's JSON Schemas into TypeScript. `native/protocol` does the same for the app: it depends on the crate (the version
+`Cargo.lock` pins) and writes `app/src/main/java/live/hanab/client/protocol/Protocol.kt` (kotlinx.serialization types for every
+message, a typed `Inbound`/`Outbound`/`Reply` for every command, and the website's constants). Like the website's generator it
+fails closed: a schema keyword it does not translate stops it, so a change is never dropped silently. The website's shared test
+cases come with the crate; they are in `app/src/test/resources/protocol` and `ProtocolFixturesTest` runs them against the types.
+
+The website changes its protocol almost daily and publishes the crate now and then, so the crate can be behind the website that
+is live. `bump main` (or a commit) then pins the website's repository as a git dependency instead, until a new version is published.
 
 ```powershell
-.\scripts\protocol.ps1 outdated   # has the website that is live changed its protocol since the pin? what changed?
-.\scripts\protocol.ps1 bump       # pin the commit the website is running now, refresh the test cases, regenerate
-.\scripts\protocol.ps1 gen        # regenerate Protocol.kt from the pin
-.\scripts\protocol.ps1 check      # fail if Protocol.kt is not what gen writes
+.\scripts\protocol.ps1 outdated     # has the website that is live got a protocol the pin does not? what changed?
+.\scripts\protocol.ps1 bump         # pin the newest published crate version, refresh the test cases, regenerate
+.\scripts\protocol.ps1 bump main    # ... or the website's newest commit (a git dependency), or a version, or a commit
+.\scripts\protocol.ps1 gen          # regenerate Protocol.kt from the pin
+.\scripts\protocol.ps1 check        # fail if Protocol.kt is not what gen writes
 ```
 
 ```bash
 ./scripts/protocol.sh outdated      # the same on macOS / Linux (needs cargo, curl and git); CI runs these
-./scripts/protocol.sh bump
+./scripts/protocol.sh bump [version | main | commit]
 ./scripts/protocol.sh gen
 ./scripts/protocol.sh check
 ```
 
-After a bump, `.uild.ps1 testDebugUnitTest` shows what changed: a message the website added or renamed fails the build in
-`WireAdapter.inbound` (which names every message with no catch-all), and a changed field fails where it is read. `Protocol.kt` is generated but checked in (like the website's own generated TypeScript), so ordinary builds need no Rust and
-no network; `check` fails if it drifts from the pin. A GitHub
-Actions job (`.github/workflows/protocol.yml`) checks the generated file on every change and, daily, whether the live website
-still has the pinned protocol. It needs cargo (rustup fetches the pinned toolchain); ordinary builds do not.
+After a bump, `.\build.ps1 testDebugUnitTest` shows what changed: a message the website added or renamed fails the build in
+`WireAdapter.inbound` (which names every message with no catch-all), and a changed field fails where it is read. `Protocol.kt`
+is generated but checked in (like the website's own generated TypeScript), so ordinary builds need no Rust and no network;
+`check` fails if it drifts from the pin. A GitHub Actions job (`.github/workflows/protocol.yml`) checks the generated file on
+every change and, daily, whether a newer crate is published or the live website has a protocol the pin does not. Regenerating
+needs cargo (rustup fetches the pinned toolchain); ordinary builds do not.
 
 ## Licence and credits
 
