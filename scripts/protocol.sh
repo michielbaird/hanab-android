@@ -70,7 +70,8 @@ case "${1:-}" in
       exit 0
     fi
     # The files of the protocol that changed between the two commits (the API answers in a single line of JSON).
-    changed="$(github "compare/$pinned...$head" | grep -o '"filename":"[^"]*"' | sed 's/"filename":"\(.*\)"/\1/' |
+    # (grep finds nothing when the pin is ahead of the live website, which is not an error.)
+    changed="$({ github "compare/$pinned...$head" | grep -o '"filename":"[^"]*"' || true; } | sed 's/"filename":"\(.*\)"/\1/' |
       while read -r file; do for p in "${paths[@]}"; do case "$file" in "$p"*) echo "$file"; break ;; esac; done; done)"
     if [ -z "$changed" ]; then
       echo "The protocol of the website that is live ($head) has not changed since the pinned commit $pinned."
