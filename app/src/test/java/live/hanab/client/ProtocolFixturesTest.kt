@@ -10,6 +10,7 @@ import live.hanab.client.protocol.InUnknown
 import live.hanab.client.protocol.Inbound
 import live.hanab.client.protocol.Outbound
 import live.hanab.client.protocol.PROTOCOL_REV
+import live.hanab.client.protocol.PROTOCOL_VERSION
 import live.hanab.client.protocol.ReplyInvalid
 import live.hanab.client.protocol.decodeReply
 import live.hanab.client.protocol.ProtocolJson
@@ -21,7 +22,7 @@ import org.junit.Test
 
 /**
  * The website's own compatibility cases (`server/protocol/fixtures/compatibility.json`, the ones its Rust and Bun tests
- * share), at the commit the generated types are pinned to: every message the server accepts must read as the type its
+ * share), at the version of the crate the generated types are pinned to: every message the server accepts must read as the type its
  * command names, and writing it back must give what the server normalizes it to (so our defaults are the server's).
  * `scripts/protocol.ps1 bump` refreshes the file together with the types.
  */

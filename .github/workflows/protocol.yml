@@ -1,7 +1,7 @@
-# The app's types for hanab.live's wire protocol come from the website's own contracts (native/protocol, scripts/protocol.ps1).
-# This keeps them honest:
-#   generated  Protocol.kt is what the generator writes for the pinned commit (nobody edited it, the pin and the file moved together)
-#   deployed   the website that is live still has the pinned protocol; when it does not, this run fails and lists what changed
+# The app's types for hanab.live's wire protocol come from the website's own contracts, the `hanabi_protocol` crate on
+# crates.io (native/protocol, scripts/protocol.sh). This keeps them honest:
+#   generated  Protocol.kt is what the generator writes for the pinned crate version (nobody edited it, the pin and the file moved together)
+#   deployed   a newer crate is published, or the website that is live has a protocol the pin does not: this run fails and lists what changed
 #              (then: scripts/protocol.sh bump, fix what the build and the unit tests show, commit)
 name: protocol
 
@@ -19,7 +19,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Protocol.kt matches the pinned commit
+      - name: Protocol.kt matches the pinned crate version
         run: ./scripts/protocol.sh check
 
   deployed:
@@ -27,7 +27,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: The live website has the pinned protocol
+      - name: The pin is up to date with the crate and the live website
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: ./scripts/protocol.sh outdated

@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
 # Keeps the app's types for hanab.live's wire protocol in step with the website's own (macOS / Linux / Git Bash;
-# scripts/protocol.ps1 does the same on Windows). See that script for what each command is for.
+# scripts/protocol.ps1 does the same on Windows, and says what each command is for).
 #
-#   ./scripts/protocol.sh gen         write Protocol.kt from the pinned commit
-#   ./scripts/protocol.sh check       fail if Protocol.kt is not what gen writes
-#   ./scripts/protocol.sh outdated    fail if the protocol of the website that is live has changed since the pin
-#   ./scripts/protocol.sh bump [rev]  move the pin (default: the commit the website is running now; `main` for its
-#                                     newest), refresh the test cases, run gen
+#   ./scripts/protocol.sh gen          write Protocol.kt from the pinned version
+#   ./scripts/protocol.sh check        fail if Protocol.kt is not what gen writes
+#   ./scripts/protocol.sh outdated     fail if the website that is live has a protocol the pin does not
+#   ./scripts/protocol.sh bump [what]  move the pin, refresh the test cases, run gen. `what` is a crate version (0.1.2), or
+#                                      `main` / a commit of the website's repository (a git dependency, for a protocol the
+#                                      crate has not published yet); by default the newest published version
 #
 # Needs cargo (rustup fetches the pinned toolchain), curl and git. GITHUB_TOKEN is used for the GitHub API if it is set.
 set -euo pipefail
@@ -14,6 +15,7 @@ set -euo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 tool="$root/native/protocol"
 manifest="$tool/Cargo.toml"
+lock="$tool/Cargo.lock"
 generated="$root/app/src/main/java/live/hanab/client/protocol/Protocol.kt"
 fixtures="$root/app/src/test/resources/protocol/compatibility.json"
 repo="Hanabi-Live/hanabi-live"
@@ -21,89 +23,129 @@ repo="Hanabi-Live/hanabi-live"
 # around the payloads (frames.ts, written by hand) are what net/WireFrames.kt follows.
 paths=(server/protocol packages/data/src/generated packages/game/src/generated packages/data/src/functions/frames.ts)
 
-pin() {
+# The version of hanabi_protocol that Cargo.lock pins.
+pin_version() {
+  local version
+  version="$(grep -A1 '^name = "hanabi_protocol"' "$lock" | sed -n 's/^version = "\(.*\)"/\1/p')"
+  [ -n "$version" ] || { echo "No hanabi_protocol in $lock" >&2; exit 1; }
+  echo "$version"
+}
+
+# The commit of the website's repository the pin was made from: the generated file says (it is written from the crate's own
+# record of the commit it was published from, or from the git dependency's commit).
+pin_commit() {
   local rev
-  rev="$(grep hanabi_protocol "$manifest" | sed -n 's/.*rev = "\([0-9a-f]*\)".*/\1/p' | head -n1)"
-  [ -n "$rev" ] || { echo "No rev for hanabi_protocol in $manifest" >&2; exit 1; }
+  rev="$(sed -n 's/^const val PROTOCOL_REV = "\([0-9a-f]\{40\}\)".*/\1/p' "$generated")"
+  [ -n "$rev" ] || { echo "No PROTOCOL_REV in $generated; run scripts/protocol.sh gen" >&2; exit 1; }
   echo "$rev"
 }
 
 generate() { (cd "$tool" && cargo run --quiet -- "$1"); }
 
-github() {
-  local args=(-fsSL -H "Accept: application/vnd.github+json" -H "User-Agent: hanab-android")
-  [ -n "${GITHUB_TOKEN:-}" ] && args+=(-H "Authorization: Bearer $GITHUB_TOKEN")
-  curl "${args[@]}" "https://api.github.com/repos/$repo/$1"
+web() {
+  local args=(-fsSL -H "Accept: application/json" -A "hanab-android (github.com/michielbaird/hanab-android)")
+  case "$1" in https://api.github.com*) [ -n "${GITHUB_TOKEN:-}" ] && args+=(-H "Authorization: Bearer $GITHUB_TOKEN") ;; esac
+  curl "${args[@]}" "$1"
 }
+
+github() { web "https://api.github.com/repos/$repo/$1"; }
+
+latest_version() { web https://crates.io/api/v1/crates/hanabi_protocol | sed -n 's/.*"max_version":"\([^"]*\)".*/\1/p'; }
 
 upstream_head() { git ls-remote "https://github.com/$repo" HEAD | cut -f1; }
 
 # The commit the website is running: its client's script is named for it (that is the version the server checks).
 deployed_rev() {
   local rev
-  rev="$(curl -fsSL https://hanab.live/ | grep -o '/public/js/bundles/main\.[0-9a-f]\{40\}\.min\.js' | head -n1 | sed 's/.*main\.\([0-9a-f]*\)\.min\.js/\1/')"
+  rev="$(curl -fsSL https://hanab.live/ | sed -n 's/.*\/public\/js\/bundles\/main\.\([0-9a-f]\{40\}\)\.min\.js.*/\1/p' | sed -n '1p')"
   [ -n "$rev" ] || { echo "Could not read the website's version" >&2; exit 1; }
   echo "$rev"
+}
+
+# sed -i differs between GNU and BSD; write through a temp file.
+set_dependency() {
+  awk -v line="$1" '/^hanabi_protocol *=/ { print line; next } { print }' "$manifest" > "$manifest.new" && mv "$manifest.new" "$manifest"
 }
 
 case "${1:-}" in
   gen)
     mkdir -p "$(dirname "$generated")"
     generate "$generated"
-    echo "Wrote $generated (pinned to $(pin))"
+    echo "Wrote $generated (hanabi_protocol $(pin_version))"
     ;;
   check)
     temp="$(mktemp)"
     trap 'rm -f "$temp"' EXIT
     generate "$temp"
     if ! cmp -s "$temp" "$generated"; then
-      echo "Protocol.kt is not what the generator writes for the pinned commit. Run scripts/protocol.sh gen." >&2
+      echo "Protocol.kt is not what the generator writes for the pinned version. Run scripts/protocol.sh gen." >&2
       exit 1
     fi
-    echo "Protocol.kt matches the pinned commit $(pin)."
+    echo "Protocol.kt matches the pinned hanabi_protocol $(pin_version)."
     ;;
   outdated)
-    pinned="$(pin)"
+    version="$(pin_version)"
+    pinned="$(pin_commit)"
     head="$(deployed_rev)"
-    if [ "$pinned" = "$head" ]; then
-      echo "The protocol of the website that is live ($head) has not changed since the pinned commit $pinned."
-      exit 0
+    latest="$(latest_version)"
+    problems=0
+    if [ "$latest" != "$version" ]; then
+      echo "A newer hanabi_protocol is published: $latest (pinned: $version). Run scripts/protocol.sh bump."
+      problems=1
     fi
-    # The files of the protocol that changed between the two commits (the API answers in a single line of JSON).
-    # (grep finds nothing when the pin is ahead of the live website, which is not an error.)
-    changed="$({ github "compare/$pinned...$head" | grep -o '"filename":"[^"]*"' || true; } | sed 's/"filename":"\(.*\)"/\1/' |
-      while read -r file; do for p in "${paths[@]}"; do case "$file" in "$p"*) echo "$file"; break ;; esac; done; done)"
-    if [ -z "$changed" ]; then
-      echo "The protocol of the website that is live ($head) has not changed since the pinned commit $pinned."
-      exit 0
+    if [ "$pinned" != "$head" ]; then
+      compare="$(github "compare/$pinned...$head")"
+      # A pin ahead of the live website (pinned on purpose, to a newer commit) has nothing to catch up on.
+      case "$compare" in
+        *'"status":"behind"'*) ;;
+        *)
+          # The files of the protocol that changed between the two commits (the API answers in a single line of JSON).
+          changed="$({ echo "$compare" | grep -o '"filename":"[^"]*"' || true; } | sed 's/"filename":"\(.*\)"/\1/' |
+            while read -r file; do for p in "${paths[@]}"; do case "$file" in "$p"*) echo "$file"; break ;; esac; done; done)"
+          if [ -n "$changed" ]; then
+            echo "The website that is live ($head) has a different protocol from hanabi_protocol $version (commit ${pinned}):"
+            # The commits between the pin and the live site, by their first eight characters (a commit starts at its own "sha";
+            # a file, a tree and a parent have one too, but no node_id beside it).
+            between="$(echo "$compare" | sed 's/{"sha":"\([0-9a-f]\{8\}\)[0-9a-f]\{32\}","node_id"/\n@\1@/g' | sed -n 's/^@\([0-9a-f]\{8\}\)@.*/\1/p')"
+            for p in "${paths[@]}"; do
+              github "commits?path=$p&sha=$head&per_page=100" | sed 's/{"sha":"\([0-9a-f]\{40\}\)","node_id"/\n\1 /g' |
+                sed -n 's/^\([0-9a-f]\{8\}\)[0-9a-f]\{32\} .*"message":"\([^"\\]*\).*/\1 \2/p'
+            done | sort -u | while read -r short message; do
+              # The list has every commit that ever touched the path; only the ones since the pin matter.
+              case "$between" in *"$short"*) echo "  $short $message" ;; esac
+            done
+            echo "$(echo "$changed" | wc -l | tr -d ' ') file(s): $(echo "$changed" | paste -sd, - | sed 's/,/, /g')"
+            if [ "$latest" = "$version" ]; then
+              echo "The crate has not published these yet: pin the website's commit with scripts/protocol.sh bump main (or the commit), or wait for a new version."
+            fi
+            problems=1
+          fi
+          ;;
+      esac
     fi
-    echo "The website that is live ($head) has a different protocol from the pinned commit ${pinned}:"
-    # The commits between the pin and the live site, by their first eight characters (a commit starts at its own "sha"; a
-    # file, a tree and a parent have one too, but no node_id beside it).
-    between="$(github "compare/$pinned...$head" | sed 's/{"sha":"\([0-9a-f]\{8\}\)[0-9a-f]\{32\}","node_id"/\n@\1@/g' | sed -n 's/^@\([0-9a-f]\{8\}\)@.*/\1/p')"
-    for p in "${paths[@]}"; do
-      github "commits?path=$p&sha=$head&per_page=100" | sed 's/{"sha":"\([0-9a-f]\{40\}\)","node_id"/\n\1 /g' |
-        sed -n 's/^\([0-9a-f]\{8\}\)[0-9a-f]\{32\} .*"message":"\([^"\\]*\).*/\1 \2/p'
-    done | sort -u | while read -r short message; do
-      # The list has every commit that ever touched the path; only the ones since the pin matter.
-      case "$between" in *"$short"*) echo "  $short $message" ;; esac
-    done
-    echo "$(echo "$changed" | wc -l | tr -d ' ') file(s): $(echo "$changed" | paste -sd, - | sed 's/,/, /g')"
-    echo "Run scripts/protocol.sh bump, fix what the build and the tests then show, and commit the result."
-    exit 1
+    if [ "$problems" = 1 ]; then
+      echo "Then fix what the build and the tests show (./gradlew testDebugUnitTest), and commit the result."
+      exit 1
+    fi
+    echo "The protocol of the website that is live ($head) has not changed since hanabi_protocol $version (commit $pinned)."
     ;;
   bump)
-    rev="${2:-}"
-    if [ -z "$rev" ]; then rev="$(deployed_rev)"; elif [ "$rev" = main ]; then rev="$(upstream_head)"; fi
-    rev="$(github "commits/$rev" | grep -o '"sha":"[0-9a-f]\{40\}"' | head -n1 | sed 's/"sha":"\(.*\)"/\1/')"
-    [ -n "$rev" ] || { echo "Could not find that commit" >&2; exit 1; }
-    # sed -i differs between GNU and BSD; write through a temp file.
-    sed "/hanabi_protocol/s/rev = \"[0-9a-f]*\"/rev = \"$rev\"/" "$manifest" > "$manifest.new" && mv "$manifest.new" "$manifest"
+    target="${2:-}"
+    [ -n "$target" ] || target="$(latest_version)"
+    if echo "$target" | grep -q '^[0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*'; then
+      set_dependency "hanabi_protocol = \"$target\""
+    else
+      [ "$target" = main ] && target="$(upstream_head)"
+      rev="$(github "commits/$target" | sed -n 's/^{"sha":"\([0-9a-f]\{40\}\)".*/\1/p')"
+      [ -n "$rev" ] || { echo "Could not find that commit" >&2; exit 1; }
+      set_dependency "hanabi_protocol = { git = \"https://github.com/$repo\", rev = \"$rev\" }"
+    fi
     (cd "$tool" && cargo update --quiet --package hanabi_protocol)
+    # The website's test cases come with the crate, whichever way it is pinned.
     mkdir -p "$(dirname "$fixtures")"
-    curl -fsSL "https://raw.githubusercontent.com/$repo/$rev/server/protocol/fixtures/compatibility.json" -o "$fixtures"
+    (cd "$tool" && cargo run --quiet -- --fixtures "$fixtures")
     generate "$generated"
-    echo "Pinned to $rev. Build and run the tests (./gradlew testDebugUnitTest): what fails is what changed."
+    echo "Pinned to hanabi_protocol $(pin_version). Build and run the tests (./gradlew testDebugUnitTest): what fails is what changed."
     git -C "$root" diff --stat
     ;;
   *)
