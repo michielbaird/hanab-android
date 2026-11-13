@@ -131,6 +131,14 @@ class WireAdapterTest {
         assertEquals(4, state.single { it.command == "replaySegment" }.data!!.jsonObject["segment"]!!.jsonPrimitive.int)
     }
 
+    /** The owner of a table leads its shared replay, so a new owner is a new leader. */
+    @Test fun aNewTableOwnerIsTheNewReplayLeader() {
+        val m = inbound("tableOwner", """{"owner":{"userId":7,"username":"bob"},"tableId":3}""").single()
+        assertEquals("replayLeader", m.command)
+        assertEquals("bob", m.data!!.jsonObject["name"]!!.jsonPrimitive.content)
+        assertEquals(3, m.data!!.jsonObject["tableID"]!!.jsonPrimitive.int)
+    }
+
     @Test fun aFinishedGameBringsItsCardsAndEveryonesNotes() {
         val m = inbound(
             "gameFinished",
