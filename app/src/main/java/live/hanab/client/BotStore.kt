@@ -3,20 +3,19 @@ package live.hanab.client
 import android.content.Context
 import android.content.SharedPreferences
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 
 /**
- * Bots (such as will-hanabi-bot's scala-bot) that you host, marked by hand in the Users list, and the
- * settings last used to invite one. Bots are controlled by private message, e.g. "/join", "/settings".
+ * The settings last used to invite a bot (such as will-hanabi-bot's scala-bot). Which users are bots is the server's to say
+ * (it marks the accounts that sign in as one), so nothing is marked by hand. A bot is asked to join by private message
+ * ("/join"), and its conventions are set for the table with "/setall" in the table chat: a bot can be at several tables at
+ * once, and that sets them for this game only.
  */
 object BotStore {
     private lateinit var prefs: SharedPreferences
 
-    val bots = mutableStateListOf<String>()
-
-    /** Convention sent with "/settings" when inviting (remembered between invites). */
+    /** Convention sent with "/setall" when inviting (remembered between invites). */
     var convention by mutableStateOf("HGroup11"); private set
 
     /** Whether to play without the human-like delay (remembered between invites). */
@@ -27,24 +26,10 @@ object BotStore {
 
     fun load(context: Context) {
         prefs = context.getSharedPreferences("hanab_bots", Context.MODE_PRIVATE)
-        bots.clear()
-        bots.addAll(prefs.getStringSet("bots", emptySet()).orEmpty().sortedBy { it.lowercase() })
+        // Bots used to be marked by hand and kept here; the server says which users are bots now.
+        prefs.edit().remove("bots").apply()
         convention = prefs.getString("convention", "HGroup11") ?: "HGroup11"
         fast = prefs.getBoolean("fast", false)
-    }
-
-    fun isBot(name: String) = bots.any { it.equals(name, ignoreCase = true) }
-
-    fun mark(name: String) {
-        if (isBot(name)) return
-        bots.add(name)
-        bots.sortBy { it.lowercase() }
-        save()
-    }
-
-    fun unmark(name: String) {
-        bots.removeAll { it.equals(name, ignoreCase = true) }
-        save()
     }
 
     fun remember(convention: String, fast: Boolean) {
@@ -53,9 +38,6 @@ object BotStore {
         prefs.edit().putString("convention", convention).putBoolean("fast", fast).apply()
     }
 
-    private fun save() {
-        prefs.edit().putStringSet("bots", bots.toSet()).apply()
-    }
 }
 
 /** True if a bot's "/settings" reply says fast mode is on, e.g. "Currently playing with HGroup11 conventions. [fast mode]". */

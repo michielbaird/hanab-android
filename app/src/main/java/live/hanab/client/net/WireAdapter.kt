@@ -227,6 +227,7 @@ class WireAdapter(
             is ActivityLobby, is ActivitySoloReplay -> {}
         }
         put("inactive", u.inactive)
+        put("bot", u.bot)
     }
 
     private fun table(t: Table): JsonObject = buildJsonObject {

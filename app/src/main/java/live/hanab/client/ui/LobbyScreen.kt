@@ -23,6 +23,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.FilterChip
+import live.hanab.client.Favorites
 import live.hanab.client.game.Variants
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
@@ -260,28 +261,17 @@ private fun ChatTab(ui: LobbyUiState, vm: LobbyViewModel) {
 private fun UsersTab(ui: LobbyUiState, onProfile: (String) -> Unit, onPm: (String) -> Unit) {
     var menuFor by remember { mutableStateOf<String?>(null) }
     val onlineNames = ui.users.values.map { it.name.lowercase() }.toSet()
-    // Marked bots first, then everyone else by name; bots that are offline are listed below.
-    val users = ui.users.values.sortedWith(compareBy({ !live.hanab.client.BotStore.isBot(it.name) }, { it.name.lowercase() }))
-    val offlineBots = live.hanab.client.BotStore.bots.filter { it.lowercase() !in onlineNames }
+    // Your favorites first, then the bots the server marks, then everyone else by name.
+    val users = ui.users.values.sortedWith(compareBy({ !Favorites.isFavorite(it.name) }, { !it.bot }, { it.name.lowercase() }))
     LazyColumn(Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
         items(users, key = { it.userID }) { u ->
-            val bot = live.hanab.client.BotStore.isBot(u.name)
+            val bot = u.bot
             Column(Modifier.fillMaxWidth().clickable { menuFor = u.name }.padding(vertical = 8.dp)) {
-                Text(u.name + if (bot) "  [BOT]" else "")
+                Text((if (Favorites.isFavorite(u.name)) "★ " else "") + u.name + if (bot) "  [BOT]" else "")
                 Text(
                     statusLabel(u, ui),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
-                )
-            }
-        }
-        if (offlineBots.isNotEmpty()) {
-            item { Text("Offline bots", style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(top = 12.dp)) }
-            items(offlineBots, key = { "off-$it" }) { n ->
-                Text(
-                    "$n  [BOT]",
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
-                    modifier = Modifier.fillMaxWidth().clickable { menuFor = n }.padding(vertical = 10.dp),
                 )
             }
         }

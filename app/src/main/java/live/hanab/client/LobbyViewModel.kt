@@ -87,7 +87,13 @@ data class LobbyUiState(
     val replayDatabaseID: Int = 0,
     /** The id of the saved offline game being replayed, so it can be analysed. */
     val offlineReplayId: Long? = null,
-)
+) {
+    /** Whether the server says [name] is a bot (it is online: the server tells us only of the users who are). */
+    fun isBot(name: String) = users.values.any { it.bot && it.name.equals(name, ignoreCase = true) }
+
+    /** The bots that are online. */
+    val bots: List<User> get() = users.values.filter { it.bot }
+}
 
 class LobbyViewModel(app: Application) : AndroidViewModel(app) {
     val client = HanabClient()
@@ -110,6 +116,7 @@ class LobbyViewModel(app: Application) : AndroidViewModel(app) {
         PipStore.init(app)
         AppSettings.load(app)
         BotStore.load(app)
+        Favorites.load(app)
         live.hanab.client.game.Characters.load(app)
         GameSounds.init(app)
         KeepAliveService.onExpired = ::onBackgroundTimeout
@@ -426,47 +433,99 @@ class LobbyViewModel(app: Application) : AndroidViewModel(app) {
     var tablePassword: String = ""
         private set
 
-    private enum class InviteStage { Settings, Fast, Join }
+    /** Where an invite is: asked to join, waiting for its answer to "/setall", or being switched to the fast mode we want. */
+    private enum class InviteStage { Joining, Settings, Fast }
 
-    private class Invite(val fast: Boolean, val password: String, var stage: InviteStage, var job: Job? = null)
+    private class Invite(
+        val bot: String,
+        val convention: String,
+        val fast: Boolean,
+        var stage: InviteStage,
+        var job: Job? = null,
+    )
 
     private val invites = HashMap<String, Invite>()
+    private var setAllJob: Job? = null
 
     private fun setBotStatus(bot: String, text: String?) = _ui.update {
         it.copy(botStatus = if (text == null) it.botStatus - bot else it.botStatus + (bot to text))
     }
 
     /**
-     * Ask a bot to join our table. The bot is configured by PM first: "/settings <convention>" (its
-     * reply says whether fast mode is on), then "/fastmode" only if that differs from what we want
-     * (it is a toggle), then "/join [password]".
+     * Ask a bot to join our table: "/join [password]" by private message. Once it is at the table its conventions are set
+     * with "/setall <convention>" in the table chat, where every bot at the table hears it. A bot can be at several tables
+     * at once, so that sets them for this game (a "/settings" by private message would set them for all its games). Its
+     * answer in the table chat says whether fast mode is on, and "/fastmode" (a toggle) is sent only if that differs from
+     * what we want.
      */
     fun inviteBot(bot: String, convention: String, fast: Boolean, password: String) {
         BotStore.remember(convention, fast)
         val key = bot.lowercase()
         invites.remove(key)?.job?.cancel()
-        val inv = Invite(fast, password, InviteStage.Settings)
+        val inv = Invite(bot, convention, fast, InviteStage.Joining)
         invites[key] = inv
-        setBotStatus(bot, "Setting $convention...")
-        sendPm(bot, "/settings $convention")
+        setBotStatus(bot, "Joining...")
+        sendPm(bot, if (password.isNotEmpty()) "/join $password" else "/join")
         inv.job = viewModelScope.launch {
-            delay(6_000)
-            if (invites[key] === inv && inv.stage != InviteStage.Join) {
-                setBotStatus(bot, "No reply from $bot; trying to join anyway")
-                joinStep(bot, inv)
+            delay(8_000)
+            if (invites[key] === inv && inv.stage == InviteStage.Joining) {
+                invites.remove(key)
+                setBotStatus(bot, "$bot did not join")
+            }
+        }
+        // It may be at the table already.
+        botsJoined()
+    }
+
+    /** Moves the invites of bots that have taken their seat on: their conventions are set for the table. */
+    private fun botsJoined() {
+        val s = _ui.value
+        val players = s.tables[s.joinedTableID]?.players.orEmpty()
+        for ((key, inv) in invites.entries.toList()) {
+            if (inv.stage != InviteStage.Joining || players.none { it.equals(inv.bot, ignoreCase = true) }) continue
+            inv.job?.cancel()
+            inv.stage = InviteStage.Settings
+            setBotStatus(inv.bot, "Setting ${inv.convention}...")
+            inv.job = viewModelScope.launch {
+                delay(6_000)
+                if (invites[key] === inv && inv.stage == InviteStage.Settings) {
+                    invites.remove(key)
+                    setBotStatus(inv.bot, "No reply from ${inv.bot}; its conventions may not be set")
+                }
+            }
+            // One "/setall" covers every bot at the table, so wait a moment for the others invited with it.
+            setAllJob?.cancel()
+            setAllJob = viewModelScope.launch {
+                delay(1_500)
+                sendTableChat("/setall ${inv.convention}")
             }
         }
     }
 
-    private fun joinStep(bot: String, inv: Invite) {
+    private fun finishInvite(inv: Invite, status: String? = null) {
         inv.job?.cancel()
-        inv.stage = InviteStage.Join
-        setBotStatus(bot, "Joining...")
-        sendPm(bot, if (inv.password.isNotEmpty()) "/join ${inv.password}" else "/join")
-        inv.job = viewModelScope.launch {
-            delay(8_000)
-            // A bot that joined shows up in the table list; anything else stays as its last status.
-            if (invites[bot.lowercase()] === inv) { invites.remove(bot.lowercase()); setBotStatus(bot, null) }
+        invites.remove(inv.bot.lowercase())
+        setBotStatus(inv.bot, status)
+    }
+
+    /** What a bot says in the table chat: its answer to "/setall" (the same text its "/settings" gives), or its refusal. */
+    private fun onBotTableChat(who: String?, text: String) {
+        val inv = invites[who?.lowercase() ?: return] ?: return
+        if (inv.stage != InviteStage.Settings) return
+        when {
+            text.startsWith("Currently playing with") -> {
+                if (replyShowsFastMode(text) != inv.fast) {
+                    inv.job?.cancel()
+                    inv.stage = InviteStage.Fast
+                    setBotStatus(inv.bot, if (inv.fast) "Turning fast mode on..." else "Turning fast mode off...")
+                    sendPm(inv.bot, "/fastmode")
+                    inv.job = viewModelScope.launch {
+                        delay(6_000)
+                        if (invites[inv.bot.lowercase()] === inv) finishInvite(inv)
+                    }
+                } else finishInvite(inv)
+            }
+            text.startsWith("Unrecognized convention") -> finishInvite(inv, text)
         }
     }
 
@@ -474,25 +533,10 @@ class LobbyViewModel(app: Application) : AndroidViewModel(app) {
     private fun onBotReply(bot: String, text: String) {
         val inv = invites[bot.lowercase()] ?: return
         when (inv.stage) {
-            InviteStage.Settings -> when {
-                text.startsWith("Currently playing with") -> {
-                    if (replyShowsFastMode(text) != inv.fast) {
-                        inv.stage = InviteStage.Fast
-                        setBotStatus(bot, if (inv.fast) "Turning fast mode on..." else "Turning fast mode off...")
-                        sendPm(bot, "/fastmode")
-                    } else joinStep(bot, inv)
-                }
-                text.startsWith("Unrecognized convention") -> {
-                    inv.job?.cancel(); invites.remove(bot.lowercase()); setBotStatus(bot, text)
-                }
-            }
-            InviteStage.Fast -> if (text.startsWith("Fast mode is now")) joinStep(bot, inv)
-            InviteStage.Join -> {
-                // e.g. "Could not join, as you are not in a room." / "Room is password protected..."
-                if (text.startsWith("Could not") || text.startsWith("Room is password")) {
-                    inv.job?.cancel(); invites.remove(bot.lowercase()); setBotStatus(bot, text)
-                }
-            }
+            // e.g. "Could not join, as you are not in a room." / "Room is password protected..."
+            InviteStage.Joining -> if (text.startsWith("Could not") || text.startsWith("Room is password")) finishInvite(inv, text)
+            InviteStage.Settings -> {}
+            InviteStage.Fast -> if (text.startsWith("Fast mode is now")) finishInvite(inv)
         }
     }
 
@@ -811,8 +855,12 @@ class LobbyViewModel(app: Application) : AndroidViewModel(app) {
             "tableList" -> (m.data as? JsonArray)?.let { arr ->
                 val tables = arr.mapNotNull { runCatching { HanabJson.decodeFromJsonElement<Table>(it) }.getOrNull() }
                 _ui.update { it.copy(tables = tables.associateBy { t -> t.id }) }
+                botsJoined()
             }
-            "table" -> m.decode<Table>()?.let { t -> _ui.update { it.copy(tables = it.tables + (t.id to t)) } }
+            "table" -> m.decode<Table>()?.let { t ->
+                _ui.update { it.copy(tables = it.tables + (t.id to t)) }
+                botsJoined()
+            }
             "tableGone" -> m.decode<TableGone>()?.let { g -> _ui.update { it.copy(tables = it.tables - g.tableID) } }
             "chatList" -> m.decode<ChatList>()?.let { l ->
                 // Lobby history and table history arrive in the same command, tagged by room.
@@ -835,7 +883,10 @@ class LobbyViewModel(app: Application) : AndroidViewModel(app) {
             "chat" -> m.decode<ChatMessage>()?.let { c ->
                 if (!c.recipient.isNullOrEmpty()) addPm(c)
                 else if (isLobby(c)) _ui.update { it.copy(chat = (it.chat + c).takeLast(300)) }
-                else if (isOurTable(c)) _ui.update { it.copy(tableChat = (it.tableChat + c).takeLast(300)) }
+                else if (isOurTable(c)) {
+                    _ui.update { it.copy(tableChat = (it.tableChat + c).takeLast(300)) }
+                    onBotTableChat(c.who, plain(c.msg))
+                }
             }
             "joined" -> (m.data as? JsonObject)?.get("tableID")?.jsonPrimitive?.intOrNull?.let { id ->
                 // A different table (e.g. after "play again") means the old game screen must go.
