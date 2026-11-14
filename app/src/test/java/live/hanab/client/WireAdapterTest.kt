@@ -275,14 +275,22 @@ class WireAdapterTest {
     @Test fun anUntimedClockCountsUpButTheAppReadsItDown() {
         val adapter = adapter()
         reply("gameInitLoad", """{"characters":[],"customDeal":false,"mode":{"type":"playing","ourPlayerIndex":0},"options":$noVariant,"playerNames":["a","b"],"startedAt":"2026-11-11T07:09:51.884Z","tableId":1}""", adapter)
-        val times = inbound("gameEvent", """{"tableId":1,"event":{"type":"playerTimes","durationMs":4000,"playerTimesMs":[1500,2500]}}""", adapter).single()
+        val times = inbound("gameEvent", """{"tableId":1,"events":[{"type":"playerTimes","durationMs":4000,"playerTimesMs":[1500,2500]}]}""", adapter).single()
         val action = times.data!!.jsonObject["action"]!!.jsonObject
         assertEquals(listOf("-1500", "-2500"), action["playerTimes"]!!.jsonArray.map { it.jsonPrimitive.content })
         assertEquals("4000", action["duration"]!!.jsonPrimitive.content)
     }
 
+    @Test fun theEventsOfOneActionBecomeOneMessageEachInOrder() {
+        val adapter = adapter()
+        reply("gameInitLoad", """{"characters":[],"customDeal":false,"mode":{"type":"playing","ourPlayerIndex":0},"options":$noVariant,"playerNames":["a","b"],"startedAt":"2026-11-11T07:09:51.884Z","tableId":1}""", adapter)
+        val messages = inbound("gameEvent", """{"tableId":1,"events":[{"type":"turn","turn":3,"currentPlayerIndex":1},{"type":"playerTimes","durationMs":4000,"playerTimesMs":[1500,2500]}]}""", adapter)
+        assertEquals(2, messages.size)
+        assertEquals(listOf("turn", "playerTimes"), messages.map { it.data!!.jsonObject["action"]!!.jsonObject["type"]!!.jsonPrimitive.content })
+    }
+
     @Test fun gameOverUsesTheOldNumbers() {
-        val over = inbound("gameEvent", """{"tableId":1,"event":{"type":"gameOver","endCondition":"strikeout","voters":[]}}""").single()
+        val over = inbound("gameEvent", """{"tableId":1,"events":[{"type":"gameOver","endCondition":"strikeout","voters":[]}]}""").single()
         assertEquals(2, over.data!!.jsonObject["action"]!!.jsonObject["endCondition"]!!.jsonPrimitive.int)
     }
 
