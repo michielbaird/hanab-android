@@ -80,9 +80,10 @@ class WireAdapter(
             put("list", JsonArray(m.data.messages.map { chat(it, m.data.table?.tableId) }))
         })
         is InGameState -> gameState(m.data)
-        is InGameEvent -> event(m.data.event)?.let {
+        // The events of one action (a play, the draw after it, the next turn) come in one message now; the app takes them in order.
+        is InGameEvent -> m.data.events.mapNotNull { event(it) }.flatMap {
             one("gameAction", buildJsonObject { put("tableID", m.data.tableId.toInt()); put("action", it) })
-        }.orEmpty()
+        }
         // The end of a game also brings every card and everyone's notes, which the players may now see.
         is InGameFinished -> listOf(
             ServerMessage("finishOngoingGame", buildJsonObject {

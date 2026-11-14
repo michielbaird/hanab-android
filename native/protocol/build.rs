@@ -32,9 +32,10 @@ fn published_commit(version: &str) -> Option<String> {
 }
 
 /// Where Cargo keeps the pinned crate's sources: the registry's copy of a published version, or the checkout of a git commit.
-fn crate_directory(version: &str, rev: &str) -> Option<PathBuf> {
+fn crate_directory(version: &str, rev: &str, git: bool) -> Option<PathBuf> {
     let home = cargo_home()?;
-    for index in fs::read_dir(home.join("registry").join("src")).into_iter().flatten().flatten() {
+    // A git pin keeps the version of the crate it was made from, so the registry may hold a different, older copy of the same version.
+    for index in fs::read_dir(home.join("registry").join("src")).into_iter().flatten().flatten().filter(|_| !git) {
         let dir = index.path().join(format!("hanabi_protocol-{version}"));
         if dir.join("fixtures").is_dir() {
             return Some(dir);
@@ -58,12 +59,13 @@ fn main() {
         .find(|block| field(block, "name").as_deref() == Some("hanabi_protocol"))
         .expect("Cargo.lock has hanabi_protocol");
     let version = field(block, "version").expect("a version");
+    let git = field(block, "source").is_some_and(|source| source.starts_with("git+"));
     let rev = match field(block, "source") {
-        Some(source) if source.starts_with("git+") => source.rsplit('#').next().map(str::to_owned),
+        Some(source) if git => source.rsplit('#').next().map(str::to_owned),
         _ => published_commit(&version),
     }
     .unwrap_or_else(|| "unknown".into());
-    let dir = crate_directory(&version, &rev).map(|dir| dir.display().to_string()).unwrap_or_default();
+    let dir = crate_directory(&version, &rev, git).map(|dir| dir.display().to_string()).unwrap_or_default();
     println!("cargo:rustc-env=HANABI_PROTOCOL_DIR={dir}");
     println!("cargo:rustc-env=HANABI_PROTOCOL_VERSION={version}");
     println!("cargo:rustc-env=HANABI_PROTOCOL_REV={rev}");
