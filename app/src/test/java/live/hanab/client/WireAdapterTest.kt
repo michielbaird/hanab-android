@@ -49,11 +49,13 @@ class WireAdapterTest {
     private val noVariant = """{"variantId":0,"speedrun":false,"deckPlays":false,"emptyClues":false,"oneExtraCard":false,"oneLessCard":false,"allOrNothing":false,"detrimentalCharacters":false}"""
 
     @Test fun welcomeBecomesTheOldOne() {
-        val m = inbound(
+        val all = inbound(
             "welcome",
-            """{"userId":110502,"username":"michiel-test","muted":false,"firstTimeUser":false,"settings":{},"friends":[],"blocked":[],"playingAtTables":[7],"spectatingAtTables":[{"tableId":9,"shadowingPlayerIndex":1}]}""",
-        ).single()
-        assertEquals("welcome", m.command)
+            """{"userId":110502,"username":"michiel-test","muted":false,"firstTimeUser":false,"settings":{},"friends":[],"blocked":[],"playingAtTables":[7],"spectatingAtTables":[{"tableId":9,"shadowingPlayerIndex":1}],"tables":[],"users":[]}""",
+        )
+        // The welcome carries the online users and the tables, so the old lists follow it.
+        assertEquals(listOf("welcome", "userList", "tableList"), all.map { it.command })
+        val m = all.first()
         val d = m.data!!.jsonObject
         assertEquals(110502, d["userID"]!!.jsonPrimitive.int)
         assertEquals(listOf(7), d["playingAtTables"]!!.jsonArray.map { it.jsonPrimitive.int })
@@ -64,12 +66,8 @@ class WireAdapterTest {
 
     @Test fun usersAndTables() {
         val adapter = adapter()
-        inbound("welcome", """{"userId":1,"username":"me","muted":false,"firstTimeUser":false,"settings":{},"friends":[],"blocked":[],"playingAtTables":[],"spectatingAtTables":[]}""", adapter)
-        val users = inbound(
-            "userList",
-            """{"users":[{"userId":6,"username":"James","activity":{"type":"sharedReplay","tableId":8816},"hGroupConventions":true,"bot":false,"inactive":false}]}""",
-            adapter,
-        ).single()
+        val users = inbound("welcome", """{"userId":1,"username":"me","muted":false,"firstTimeUser":false,"settings":{},"friends":[],"blocked":[],"playingAtTables":[],"spectatingAtTables":[],"tables":[],"users":[{"userId":6,"username":"James","activity":{"type":"sharedReplay","tableId":8816},"hGroupConventions":true,"bot":false,"inactive":false}]}""", adapter)
+            .single { it.command == "userList" }
         val james = (users.data as JsonArray).single().jsonObject
         assertEquals("James", james["name"]!!.jsonPrimitive.content)
         assertEquals("Shared Replay", james["status"]!!.jsonPrimitive.content)
@@ -104,9 +102,9 @@ class WireAdapterTest {
     /** The server marks bots now, so the app does not keep a list of its own. */
     @Test fun theServerSaysWhoIsABot() {
         val users = inbound(
-            "userList",
-            """{"users":[{"userId":1,"username":"potato_bot_1","activity":{"type":"lobby"},"hGroupConventions":false,"bot":true,"inactive":false},{"userId":2,"username":"alice","activity":{"type":"lobby"},"hGroupConventions":false,"bot":false,"inactive":false}]}""",
-        ).single().data as JsonArray
+            "welcome",
+            """{"userId":3,"username":"me","muted":false,"firstTimeUser":false,"settings":{},"friends":[],"blocked":[],"playingAtTables":[],"spectatingAtTables":[],"tables":[],"users":[{"userId":1,"username":"potato_bot_1","activity":{"type":"lobby"},"hGroupConventions":false,"bot":true,"inactive":false},{"userId":2,"username":"alice","activity":{"type":"lobby"},"hGroupConventions":false,"bot":false,"inactive":false}]}""",
+        ).single { it.command == "userList" }.data as JsonArray
         val parsed = users.map { HanabJson.decodeFromJsonElement<live.hanab.client.net.User>(it) }
         assertEquals(listOf(true, false), parsed.map { it.bot })
         val ui = live.hanab.client.LobbyUiState(users = parsed.associateBy { it.userID })

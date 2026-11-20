@@ -49,12 +49,15 @@ class WireAdapter(
     fun inbound(m: Inbound): List<ServerMessage> = when (m) {
         is InWelcome -> {
             me = m.data.username
-            one("welcome", welcome(m.data))
+            // The welcome carries the online users and the lobby's tables now (they were messages of their own).
+            listOf(
+                ServerMessage("welcome", welcome(m.data)),
+                ServerMessage("userList", JsonArray(m.data.users.map(::user))),
+                ServerMessage("tableList", JsonArray(m.data.tables.map(::table))),
+            )
         }
-        is InUserList -> one("userList", JsonArray(m.data.users.map(::user)))
         is InUser -> one("user", user(m.data))
         is InUserRemoved -> one("userLeft", buildJsonObject { put("userID", m.data.userId) })
-        is InTableList -> one("tableList", JsonArray(m.data.tables.map(::table)))
         is InTable -> one("table", table(m.data))
         is InTableRemoved -> one("tableGone", tableRef(m.data))
         is InTableJoined -> {
@@ -120,7 +123,7 @@ class WireAdapter(
         is InInvalid -> unreadable(m.command, m.error)
         // The rest the app has no use for (yet).
         is InUnknown, is InBlocked, is InFriends, is InChatDeleted, is InChatTyping, is InClock, is InConnections,
-        is InGameHistoryAdded, is InIdleReset, is InIdleWarning, is InLobbyStatus, is InPause, is InServerShutdown,
+        is InIdleReset, is InIdleWarning, is InLobbyStatus, is InPause, is InServerShutdown,
         is InSpectators, is InTableRestartDecliners, is InTableSettingsSuggestion, is InTableSuggestion,
         -> emptyList()
     }
@@ -137,8 +140,6 @@ class WireAdapter(
         // A game's setup is the answer to the request to load it now (it was a message of its own).
         is ReplyGameInitLoad -> one("init", init(r.data, tableId ?: 0L))
         is ReplyInvalid -> unreadable(r.command, r.error)
-        // The app asks for neither of these.
-        is ReplyGameHistory, is ReplySeedGames -> emptyList()
     }
 
     /** The website's protocol is not the one this app was built for. Say so once per message. */

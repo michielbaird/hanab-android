@@ -56,22 +56,21 @@
     "valid": false
   },
   {
-    "name": "ready statistics can accurately report zero games",
+    "name": "a ready lobby has no other fields",
+    "direction": "event",
+    "command": "lobbyStatus",
+    "input": {
+      "type": "ready"
+    },
+    "valid": true
+  },
+  {
+    "name": "a ready lobby no longer counts the player's games",
     "direction": "event",
     "command": "lobbyStatus",
     "input": {
       "type": "ready",
       "numGames": 0
-    },
-    "valid": true
-  },
-  {
-    "name": "ready statistics cannot omit the real total",
-    "direction": "event",
-    "command": "lobbyStatus",
-    "input": {
-      "type": "ready",
-      "numGames": null
     },
     "valid": false
   },
@@ -438,28 +437,6 @@
     "valid": false
   },
   {
-    "name": "user list holds presences",
-    "direction": "event",
-    "command": "userList",
-    "input": {
-      "users": [
-        {
-          "userId": 7,
-          "username": "Alice",
-          "activity": {
-            "type": "playing",
-            "tableId": 3
-          },
-          "hGroupConventions": false,
-          "hGroupLevel": 3,
-          "bot": false,
-          "inactive": false
-        }
-      ]
-    },
-    "valid": true
-  },
-  {
     "name": "a user at a table names it",
     "direction": "event",
     "command": "user",
@@ -493,7 +470,7 @@
     "valid": false
   },
   {
-    "name": "welcome fills unchanged settings with the same defaults",
+    "name": "welcome fills unchanged settings with the same defaults, and lists who is online",
     "direction": "event",
     "command": "welcome",
     "input": {
@@ -505,6 +482,21 @@
       "blocked": [],
       "playingAtTables": [3],
       "spectatingAtTables": [],
+      "users": [
+        {
+          "userId": 7,
+          "username": "Alice",
+          "activity": {
+            "type": "playing",
+            "tableId": 3
+          },
+          "hGroupConventions": false,
+          "hGroupLevel": 3,
+          "bot": false,
+          "inactive": false
+        }
+      ],
+      "tables": [],
       "settings": {
         "volume": 70
       }
@@ -519,11 +511,25 @@
       "blocked": [],
       "playingAtTables": [3],
       "spectatingAtTables": [],
+      "users": [
+        {
+          "userId": 7,
+          "username": "Alice",
+          "activity": {
+            "type": "playing",
+            "tableId": 3
+          },
+          "hGroupConventions": false,
+          "hGroupLevel": 3,
+          "bot": false,
+          "inactive": false
+        }
+      ],
+      "tables": [],
       "settings": {
         "desktopNotification": false,
         "soundMove": "all",
         "soundTimer": true,
-        "darkMode": false,
         "keldonMode": false,
         "newUi": false,
         "colorblindMode": false,
@@ -565,6 +571,8 @@
       "blocked": [],
       "playingAtTables": [3],
       "spectatingAtTables": [],
+      "users": [],
+      "tables": [],
       "settings": {
         "createTable": {
           "options": {
@@ -587,11 +595,12 @@
       "blocked": [],
       "playingAtTables": [3],
       "spectatingAtTables": [],
+      "users": [],
+      "tables": [],
       "settings": {
         "desktopNotification": false,
         "soundMove": "all",
         "soundTimer": true,
-        "darkMode": false,
         "keldonMode": false,
         "newUi": false,
         "colorblindMode": false,
@@ -637,6 +646,8 @@
       "blocked": [],
       "playingAtTables": [3],
       "spectatingAtTables": [],
+      "users": [],
+      "tables": [],
       "settings": {
         "createTable": {
           "maxPlayers": 7
@@ -911,26 +922,6 @@
     "valid": false
   },
   {
-    "name": "history pages start at zero or later",
-    "direction": "request",
-    "command": "gameHistory",
-    "input": {
-      "offset": -1,
-      "limit": 10
-    },
-    "valid": false
-  },
-  {
-    "name": "history pages hold at most the largest page",
-    "direction": "request",
-    "command": "gameHistory",
-    "input": {
-      "offset": 0,
-      "limit": 101
-    },
-    "valid": false
-  },
-  {
     "name": "tables report a pregame roster below the minimum",
     "direction": "event",
     "command": "table",
@@ -993,146 +984,6 @@
       ]
     },
     "valid": true
-  },
-  {
-    "name": "history accepts timestamps in UTC with milliseconds",
-    "direction": "event",
-    "command": "gameHistoryAdded",
-    "input": {
-      "gameId": 12,
-      "options": {
-        "variantId": 0,
-        "speedrun": false,
-        "deckPlays": false,
-        "emptyClues": false,
-        "oneExtraCard": false,
-        "oneLessCard": false,
-        "allOrNothing": false,
-        "detrimentalCharacters": false
-      },
-      "seed": "p2v0s1",
-      "score": 25,
-      "numTurns": 40,
-      "endCondition": "normal",
-      "startedAt": "2023-12-29T18:00:00.000Z",
-      "finishedAt": "2023-12-29T18:21:43.812Z",
-      "numGamesOnSeed": 3,
-      "playerNames": ["Alice", "Bob"],
-      "tags": []
-    },
-    "valid": true
-  },
-  {
-    "name": "history rejects a timestamp with an offset",
-    "direction": "event",
-    "command": "gameHistoryAdded",
-    "input": {
-      "gameId": 12,
-      "options": {
-        "variantId": 0,
-        "speedrun": false,
-        "deckPlays": false,
-        "emptyClues": false,
-        "oneExtraCard": false,
-        "oneLessCard": false,
-        "allOrNothing": false,
-        "detrimentalCharacters": false
-      },
-      "seed": "p2v0s1",
-      "score": 25,
-      "numTurns": 40,
-      "endCondition": "normal",
-      "startedAt": "2023-12-29T18:00:00.000+00:00",
-      "finishedAt": "2023-12-29T18:21:43.812Z",
-      "numGamesOnSeed": 3,
-      "playerNames": ["Alice", "Bob"],
-      "tags": []
-    },
-    "valid": false
-  },
-  {
-    "name": "history rejects a timestamp without milliseconds",
-    "direction": "event",
-    "command": "gameHistoryAdded",
-    "input": {
-      "gameId": 12,
-      "options": {
-        "variantId": 0,
-        "speedrun": false,
-        "deckPlays": false,
-        "emptyClues": false,
-        "oneExtraCard": false,
-        "oneLessCard": false,
-        "allOrNothing": false,
-        "detrimentalCharacters": false
-      },
-      "seed": "p2v0s1",
-      "score": 25,
-      "numTurns": 40,
-      "endCondition": "normal",
-      "startedAt": "2023-12-29T18:00:00Z",
-      "finishedAt": "2023-12-29T18:21:43.812Z",
-      "numGamesOnSeed": 3,
-      "playerNames": ["Alice", "Bob"],
-      "tags": []
-    },
-    "valid": false
-  },
-  {
-    "name": "history rejects a timestamp with microseconds",
-    "direction": "event",
-    "command": "gameHistoryAdded",
-    "input": {
-      "gameId": 12,
-      "options": {
-        "variantId": 0,
-        "speedrun": false,
-        "deckPlays": false,
-        "emptyClues": false,
-        "oneExtraCard": false,
-        "oneLessCard": false,
-        "allOrNothing": false,
-        "detrimentalCharacters": false
-      },
-      "seed": "p2v0s1",
-      "score": 25,
-      "numTurns": 40,
-      "endCondition": "normal",
-      "startedAt": "2023-12-29T18:00:00.000000Z",
-      "finishedAt": "2023-12-29T18:21:43.812Z",
-      "numGamesOnSeed": 3,
-      "playerNames": ["Alice", "Bob"],
-      "tags": []
-    },
-    "valid": false
-  },
-  {
-    "name": "history rejects a date that cannot be parsed",
-    "direction": "event",
-    "command": "gameHistoryAdded",
-    "input": {
-      "gameId": 12,
-      "options": {
-        "variantId": 0,
-        "speedrun": false,
-        "deckPlays": false,
-        "emptyClues": false,
-        "oneExtraCard": false,
-        "oneLessCard": false,
-        "allOrNothing": false,
-        "detrimentalCharacters": false
-      },
-      "seed": "p2v0s1",
-      "score": 25,
-      "numTurns": 40,
-      "endCondition": "normal",
-      "startedAt": "yesterday",
-      "finishedAt": "2023-12-29T18:21:43.812Z",
-      "numGamesOnSeed": 3,
-      "playerNames": ["Alice", "Bob"],
-      "tags": []
-    },
-    "valid": false
   },
   {
     "name": "hypothetical actions are typed objects",
@@ -1524,6 +1375,22 @@
     "valid": true
   },
   {
+    "name": "replay arrows point at a player's name by seat",
+    "direction": "request",
+    "command": "replayAction",
+    "input": {
+      "tableId": 4,
+      "action": {
+        "type": "arrow",
+        "target": {
+          "type": "player",
+          "playerIndex": 2
+        }
+      }
+    },
+    "valid": true
+  },
+  {
     "name": "a replay arrow without a target clears the arrow",
     "direction": "request",
     "command": "replayAction",
@@ -1651,20 +1518,6 @@
       "messages": [],
       "table": { "tableId": 1, "numUnread": -1 }
     },
-    "valid": false
-  },
-  {
-    "name": "a game page counts its games",
-    "direction": "reply",
-    "command": "gameHistory",
-    "input": { "games": [], "total": 0 },
-    "valid": true
-  },
-  {
-    "name": "a game page has no offset, which only the request names",
-    "direction": "reply",
-    "command": "gameHistory",
-    "input": { "games": [], "total": 0, "offset": 0 },
     "valid": false
   }
 ]
