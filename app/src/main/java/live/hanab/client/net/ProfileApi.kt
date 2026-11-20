@@ -10,8 +10,7 @@ import okhttp3.HttpUrl.Companion.toHttpUrl
 import live.hanab.client.protocol.GameSummary
 import live.hanab.client.protocol.GamePage
 import live.hanab.client.protocol.ProtocolJson
-import live.hanab.client.protocol.PublicPageTable
-import live.hanab.client.protocol.PublicPageTableScores
+import live.hanab.client.protocol.PlayerScores
 import live.hanab.client.protocol.VariantScores
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -70,8 +69,7 @@ data class ProfilePage(
 class NoSuchPlayer : Exception("That player does not exist.")
 
 /**
- * The public, read-only side of hanab.live (no sign-in needed). Game history comes from its JSON API; the stats
- * only exist in the website's server-rendered profile page, so [parseScores] reads that.
+ * The public, read-only side of hanab.live (no sign-in needed): game history and stats both come from its JSON API.
  */
 object ProfileApi {
     const val HISTORY_PAGE_SIZE = 20
@@ -107,10 +105,10 @@ object ProfileApi {
         return loaded
     }
 
-    /** The stats page of [name]. */
+    /** The stats of [name], from the site's JSON. */
     suspend fun scores(name: String): ProfilePage = withContext(Dispatchers.IO) {
-        val url = "https://$BASE_HOST/scores".toHttpUrl().newBuilder().addPathSegment(name).build()
-        parseScores(get(url.toString(), json = false)) ?: error("The profile page was not in the expected format")
+        val url = "https://$BASE_HOST/api/v1/scores".toHttpUrl().newBuilder().addPathSegment(name).build()
+        profileOf(ProtocolJson.decodeFromString(PlayerScores.serializer(), get(url.toString())))
     }
 
     /**
@@ -133,90 +131,28 @@ object ProfileApi {
         }
 }
 
-private val FACT = Regex("""<li>\s*<span class="stat-description"\s*>(.*?)</span\s*>(.*?)</li>""", RegexOption.DOT_MATCHES_ALL)
-private val ROW = Regex("""<tr>(.*?)</tr>""", RegexOption.DOT_MATCHES_ALL)
-private val CELL = Regex("""<td[^>]*>(.*?)</td>""", RegexOption.DOT_MATCHES_ALL)
-private val TAG = Regex("""<[^>]+>""")
-private val SCORE = Regex("""(\d+)\s*/\s*(\d+)""")
-/** The icon the page puts next to a score made with an option, marking it as still a normal score. */
-private val MODIFIER = "score-modifier"
-
-/** The grid of a profile page: the JSON that `public-pages` draws into `#public-page-table`. */
-private val TABLE = Regex("""id="public-page-table"[^>]*\sdata-table="([^"]*)"""")
-private val ATTRIBUTE_ENTITY = Regex("""&(?:#(\d+)|#x([0-9a-fA-F]+)|(amp|lt|gt|quot|#39));""")
-
-/** The text of a bit of HTML: tags gone, entities decoded, whitespace collapsed. */
-private fun text(html: String): String =
-    TAG.replace(html, " ")
-        .replace("&nbsp;", " ").replace("&lt;", "<").replace("&gt;", ">").replace("&quot;", "\"")
-        .replace("&#39;", "'").replace("&#x27;", "'").replace("&amp;", "&")
-        .replace(Regex("""\s+"""), " ").trim()
-
-/** An attribute value as the HTML source spells it: entities decoded, since `data-table` holds JSON in one. */
-private fun attributeValue(raw: String): String =
-    ATTRIBUTE_ENTITY.replace(raw) { m ->
-        val named = m.groupValues[3]
-        when {
-            named == "amp" -> "&"
-            named == "lt" -> "<"
-            named == "gt" -> ">"
-            named == "quot" -> "\""
-            named.isNotEmpty() -> "'"
-            m.groupValues[1].isNotEmpty() -> m.groupValues[1].toIntOrNull()?.let { String(Character.toChars(it)) } ?: m.value
-            else -> m.groupValues[2].toIntOrNull(16)?.let { String(Character.toChars(it)) } ?: m.value
+/** What the website's profile page shows, from its JSON (`/api/v1/scores/<name>`). */
+fun profileOf(scores: PlayerScores): ProfilePage {
+    val s = scores.statistics
+    val facts = buildList {
+        add("Date joined" to s.dateJoined.substringBefore("T"))
+        add("Games played" to "${s.numGamesTotal} (${s.numGamesNormal} normal, ${s.numGamesSpeedrun} speedrun, ${s.numGamesOther} other)")
+        add("Time spent playing" to durationText(s.timePlayedSeconds.toLong() * 1000))
+        if (s.timePlayedSpeedrunSeconds.toLong() > 0) add("Time spent in speedruns" to durationText(s.timePlayedSpeedrunSeconds.toLong() * 1000))
+        if (s.timeReviewedSeconds.toLong() > 0) add("Time spent reviewing" to durationText(s.timeReviewedSeconds.toLong() * 1000))
+        add("Total max scores" to "${scores.maxScores.total} (${"%.1f".format(java.util.Locale.US, scores.maxScores.percentage)}%)")
+        scores.maxScores.perType.forEachIndexed { i, c ->
+            add("Max scores at ${i + 2} players" to "${c.total} (${"%.1f".format(java.util.Locale.US, c.percentage)}%)")
         }
     }
-
-/**
- * Reads the website's profile page; null if it has neither grid. The grid is JSON in `data-table` (the page's
- * script draws it), so the best scores come from the site's own contract. A page from before that change still
- * has its table in the HTML, so that is read as well.
- */
-fun parseScores(html: String): ProfilePage? {
-    val table = html.indexOf("id=\"public-page-table\"")
-    val grid = TABLE.find(html)?.groupValues?.get(1)?.let { runCatching { ProtocolJson.decodeFromString(PublicPageTable.serializer(), attributeValue(it)) }.getOrNull() }
-    if (grid is PublicPageTableScores) {
-        val facts = FACT.findAll(if (table < 0) html else html.substring(0, table))
-            .map { text(it.groupValues[1]).trimEnd(':') to text(it.groupValues[2]) }
-            .toList()
-        return ProfilePage(facts, grid.variants.map(::variantRow), hasAverages = false)
-    }
-    return parseLegacyScores(html)
+    return ProfilePage(facts, scores.variants.map(::variantRow), hasAverages = false)
 }
 
 /** One variant of the site's grid, with a row for each table size (2 to 6 players, in that order). */
 private fun variantRow(v: VariantScores): VariantRow {
     val best = (0 until 5).map { i ->
         val b = v.bestScores.getOrNull(i)
-        BestScore(b?.score ?: 0, v.maxScore, modified = b?.modifier != null)
+        BestScore(b?.score?.toInt() ?: 0, v.maxScore.toInt(), modified = b?.modifier != null)
     }
     return VariantRow(v.variantName, v.numGames.toInt(), best, average = null, strikeoutRate = null)
-}
-
-/** The table that profile pages had before it became a JSON blob; null if this page has no such table. */
-private fun parseLegacyScores(html: String): ProfilePage? {
-    val table = html.indexOf("<table class=\"history\"")
-    if (table < 0) return null
-    val facts = FACT.findAll(html.substring(0, table)).map { text(it.groupValues[1]).trimEnd(':') to text(it.groupValues[2]) }.toList()
-    val body = html.substring(table).substringAfter("<tbody>", "").substringBefore("</tbody>")
-    val rows = ROW.findAll(body).mapNotNull { row ->
-        // Each cell kept as HTML as well as text: a marked score has an icon next to it.
-        val raw = CELL.findAll(row.groupValues[1]).map { it.groupValues[1] }.toList()
-        val cells = raw.map { text(it) }
-        // The grid has the total and the five best scores; older pages also had the average and the strikeout rate.
-        if (cells.size < 7) return@mapNotNull null
-        // A table size nobody played shows a dash: no score yet, out of what the other sizes show.
-        val found = cells.subList(2, 7).mapIndexed { i, c ->
-            SCORE.find(c)?.let { BestScore(it.groupValues[1].toInt(), it.groupValues[2].toInt(), modified = MODIFIER in raw[i + 2]) }
-        }
-        val max = found.firstNotNullOfOrNull { it?.max } ?: 0
-        VariantRow(
-            variant = cells[0],
-            games = cells[1].replace(",", "").toIntOrNull() ?: return@mapNotNull null,
-            best = found.map { it ?: BestScore(0, max) },
-            average = cells.getOrNull(7)?.toDoubleOrNull(),
-            strikeoutRate = cells.getOrNull(8)?.removeSuffix("%")?.toDoubleOrNull(),
-        )
-    }.toList()
-    return ProfilePage(facts, rows)
 }
