@@ -429,11 +429,11 @@ class LobbyViewModel(app: Application) : AndroidViewModel(app) {
 
     // ---------------------------------------------------------------- bots
 
-    /** Password of the table we created or joined, if any; "/join" needs it for protected tables. */
+    /** Password of the table we created or joined, if any; "!join" needs it for protected tables. */
     var tablePassword: String = ""
         private set
 
-    /** Where an invite is: asked to join, waiting for its answer to "/setall", or being switched to the fast mode we want. */
+    /** Where an invite is: asked to join, waiting for its answer to "!setall", or being switched to the fast mode we want. */
     private enum class InviteStage { Joining, Settings, Fast }
 
     private class Invite(
@@ -452,10 +452,10 @@ class LobbyViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /**
-     * Ask a bot to join our table: "/join [password]" by private message. Once it is at the table its conventions are set
-     * with "/setall <convention>" in the table chat, where every bot at the table hears it. A bot can be at several tables
-     * at once, so that sets them for this game (a "/settings" by private message would set them for all its games). Its
-     * answer in the table chat says whether fast mode is on, and "/fastmode" (a toggle) is sent only if that differs from
+     * Ask a bot to join our table: "!join [password]" by private message. Once it is at the table its conventions are set
+     * with "!setall <convention>" in the table chat, where every bot at the table hears it. A bot can be at several tables
+     * at once, so that sets them for this game (a "!settings" by private message would set them for all its games). Its
+     * answer in the table chat says whether fast mode is on, and "!fastmode" (a toggle) is sent only if that differs from
      * what we want.
      */
     fun inviteBot(bot: String, convention: String, fast: Boolean, password: String) {
@@ -465,7 +465,7 @@ class LobbyViewModel(app: Application) : AndroidViewModel(app) {
         val inv = Invite(bot, convention, fast, InviteStage.Joining)
         invites[key] = inv
         setBotStatus(bot, "Joining...")
-        sendPm(bot, if (password.isNotEmpty()) "/join $password" else "/join")
+        sendPm(bot, if (password.isNotEmpty()) "!join $password" else "!join")
         inv.job = viewModelScope.launch {
             delay(8_000)
             if (invites[key] === inv && inv.stage == InviteStage.Joining) {
@@ -493,11 +493,11 @@ class LobbyViewModel(app: Application) : AndroidViewModel(app) {
                     setBotStatus(inv.bot, "No reply from ${inv.bot}; its conventions may not be set")
                 }
             }
-            // One "/setall" covers every bot at the table, so wait a moment for the others invited with it.
+            // One "!setall" covers every bot at the table, so wait a moment for the others invited with it.
             setAllJob?.cancel()
             setAllJob = viewModelScope.launch {
                 delay(1_500)
-                sendTableChat("/setall ${inv.convention}")
+                sendTableChat("!setall ${inv.convention}")
             }
         }
     }
@@ -508,7 +508,7 @@ class LobbyViewModel(app: Application) : AndroidViewModel(app) {
         setBotStatus(inv.bot, status)
     }
 
-    /** What a bot says in the table chat: its answer to "/setall" (the same text its "/settings" gives), or its refusal. */
+    /** What a bot says in the table chat: its answer to "!setall" (the same text its "!settings" gives), or its refusal. */
     private fun onBotTableChat(who: String?, text: String) {
         val inv = invites[who?.lowercase() ?: return] ?: return
         if (inv.stage != InviteStage.Settings) return
@@ -518,7 +518,7 @@ class LobbyViewModel(app: Application) : AndroidViewModel(app) {
                     inv.job?.cancel()
                     inv.stage = InviteStage.Fast
                     setBotStatus(inv.bot, if (inv.fast) "Turning fast mode on..." else "Turning fast mode off...")
-                    sendPm(inv.bot, "/fastmode")
+                    sendPm(inv.bot, "!fastmode")
                     inv.job = viewModelScope.launch {
                         delay(6_000)
                         if (invites[inv.bot.lowercase()] === inv) finishInvite(inv)
@@ -540,11 +540,11 @@ class LobbyViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    fun kickBot(bot: String) = sendPm(bot, "/leave")
+    fun kickBot(bot: String) = sendPm(bot, "!leave")
 
     /** Table-wide bot commands go through the table chat, where every bot at the table hears them. */
-    fun setAllBots(convention: String) = sendTableChat("/setall $convention")
-    fun leaveAllBots() = sendTableChat("/leaveall")
+    fun setAllBots(convention: String) = sendTableChat("!setall $convention")
+    fun leaveAllBots() = sendTableChat("!leaveall")
 
     fun dismissBotStatus(bot: String) = setBotStatus(bot, null)
 

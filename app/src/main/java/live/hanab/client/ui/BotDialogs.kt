@@ -93,7 +93,7 @@ fun InviteBotDialog(
     )
 }
 
-/** Set the same conventions on every bot at the table ("/setall" in table chat). */
+/** Set the same conventions on every bot at the table ("!setall" in table chat). */
 @Composable
 fun SetAllBotsDialog(onSet: (String) -> Unit, onDismiss: () -> Unit) {
     var convention by remember { mutableStateOf(BotStore.convention) }

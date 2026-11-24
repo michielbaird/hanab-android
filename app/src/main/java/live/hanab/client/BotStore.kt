@@ -9,13 +9,13 @@ import androidx.compose.runtime.setValue
 /**
  * The settings last used to invite a bot (such as will-hanabi-bot's scala-bot). Which users are bots is the server's to say
  * (it marks the accounts that sign in as one), so nothing is marked by hand. A bot is asked to join by private message
- * ("/join"), and its conventions are set for the table with "/setall" in the table chat: a bot can be at several tables at
+ * ("!join"), and its conventions are set for the table with "!setall" in the table chat: a bot can be at several tables at
  * once, and that sets them for this game only.
  */
 object BotStore {
     private lateinit var prefs: SharedPreferences
 
-    /** Convention sent with "/setall" when inviting (remembered between invites). */
+    /** Convention sent with "!setall" when inviting (remembered between invites). */
     var convention by mutableStateOf("HGroup11"); private set
 
     /** Whether to play without the human-like delay (remembered between invites). */
@@ -40,5 +40,5 @@ object BotStore {
 
 }
 
-/** True if a bot's "/settings" reply says fast mode is on, e.g. "Currently playing with HGroup11 conventions. [fast mode]". */
+/** True if a bot's "!settings" reply says fast mode is on, e.g. "Currently playing with HGroup11 conventions. [fast mode]". */
 fun replyShowsFastMode(text: String) = text.contains("[fast mode]")
