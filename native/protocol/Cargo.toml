@@ -7,7 +7,7 @@ publish = false
 [dependencies]
 # The website's wire contracts, from crates.io. Cargo.lock pins the exact version (and its checksum); `scripts/protocol.ps1 bump`
 # (or protocol.sh) moves it. The crate is published now and then while the website changes almost daily, so a pin ahead of
-# it can be a git dependency instead: hanabi_protocol = { git = "https://github.com/Hanabi-Live/hanabi-live", rev = "<commit>" }.
-hanabi_protocol = { git = "https://github.com/Hanabi-Live/hanabi-live", rev = "a8043d55b91922566d0b7b9a70c921397e293b9b" }
+# it can be a git dependency instead: hanabi-protocol = { git = "https://github.com/Hanabi-Live/hanabi-live", rev = "<commit>" }.
+hanabi-protocol = { git = "https://github.com/Hanabi-Live/hanabi-live", rev = "c50a6bfa00c3cf079be790d8e409d50888493ddc" }
 serde_json = "1"
 anyhow = "1"

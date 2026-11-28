@@ -4,6 +4,7 @@ import live.hanab.client.net.HanabJson
 import live.hanab.client.net.HistoryRow
 import live.hanab.client.protocol.GamePage
 import live.hanab.client.protocol.ProtocolJson
+import live.hanab.client.net.parseBestScores
 import live.hanab.client.net.profileOf
 import live.hanab.client.protocol.PlayerScores
 import org.junit.Assert.assertEquals
@@ -30,50 +31,59 @@ class ProfileApiTest {
     /** Trimmed from a real `/api/v1/scores/<name>` answer. */
     private val scores = """
         {"name":"RandP","maxScores":{"percentage":0.1,"total":10,"perType":[{"percentage":1.5,"total":4},{"percentage":0,"total":0}]},
-         "statistics":{"dateJoined":"2020-03-31T12:00:00Z","numGamesNormal":418,"numGamesOther":10,"numGamesSpeedrun":56,"numGamesTotal":484,
-           "timePlayedSeconds":603620,"timePlayedSpeedrunSeconds":0,"timeReviewedSeconds":3600,"timeTotalSeconds":607220},
-         "variants":[
-           {"variantName":"No Variant","maxScore":25,"numGames":1564,"bestScores":[{"score":25},{"score":25},{"score":25},{"score":25},{"score":25}]},
-           {"variantName":"Muddy Rainbow (6 Suits)","maxScore":30,"numGames":19,"bestScores":[{"score":30},{"score":30,"modifier":"deckPlays"},{},{},{}]},
-           {"variantName":"Omni & Black","maxScore":20,"numGames":0,"bestScores":[]}
-         ]}
+         "achievements":[{"id":"noVariant10Wins","name":"First","description":"d","goal":1,"progress":1,"dateUnlocked":"2021-01-02T03:04:05Z","unlockedPercentage":50.0},
+                         {"id":"black10Wins","name":"Ten","description":"d","goal":10,"progress":3,"unlockedPercentage":10.0}],
+         "statistics":{"dateJoined":"2020-03-31T12:00:00Z","numGames":484,"numGamesNormal":418,
+           "timePlayedSeconds":603620,"timeReviewedSeconds":3600,"timeTotalSeconds":607220,
+           "bestStreak":{"length":7,"numPlayers":3,"variantId":0}}}
     """.trimIndent().replace("\n", "")
 
     @Test fun readsTheFacts() {
         val p = profileOf(ProtocolJson.decodeFromString(PlayerScores.serializer(), scores))
         assertEquals("Date joined" to "2020-03-31", p.facts[0])
-        assertEquals("Games played" to "484 (418 normal, 56 speedrun, 10 other)", p.facts[1])
+        assertEquals("Games played" to "484 (418 finished normally)", p.facts[1])
         assertEquals("6 days, 23 hours, and 40 minutes", p.facts[2].second)
-        assertEquals("Time spent reviewing" to "1 hour", p.facts.single { it.first == "Time spent reviewing" })
-        // No speedrun time, so no line for it.
-        assertTrue(p.facts.none { it.first == "Time spent in speedruns" })
+        assertEquals("1 hour", p.facts.single { it.first == "Time spent reviewing" }.second)
+        assertEquals("7 max scores in a row (3 players)", p.facts.single { it.first == "Longest streak" }.second)
         assertEquals("10 (0.1%)", p.facts.single { it.first == "Total max scores" }.second)
         assertEquals("4 (1.5%)", p.facts.single { it.first == "Max scores at 2 players" }.second)
+        assertEquals("1 of 2", p.facts.single { it.first == "Achievements" }.second)
     }
 
-    @Test fun readsTheGrid() {
-        val page = profileOf(ProtocolJson.decodeFromString(PlayerScores.serializer(), scores))
-        // The site sends no average or strikeout rate, so the grid must not claim to have them.
-        assertFalse(page.hasAverages)
-        val rows = page.rows
+    /** The grid is the JSON that the best scores page draws into `#public-page-table`. */
+    @Test fun readsTheBestScoresTheSiteSends() {
+        val json = """
+            {"type":"bestScores","rows":[
+              {"variantName":"No Variant","recipe":"x","maxScore":25,"scores":[{"numPlayers":2,"score":25,"gameId":9},{"numPlayers":3,"score":24},{"numPlayers":5,"score":25}]},
+              {"variantName":"Muddy Rainbow (6 Suits)","recipe":"y","maxScore":30,"scores":[{"numPlayers":4,"score":30,"modifier":"deckPlays"}]},
+              {"variantName":"Omni & Black","recipe":"z","maxScore":20,"scores":[]}
+            ]}
+        """.trimIndent().replace("\n", "")
+        val html = """<div id="public-page-table" data-table="${json.replace("&", "&amp;").replace("\"", "&quot;")}"></div>"""
+
+        val rows = parseBestScores(html)!!
         assertEquals(3, rows.size)
-        val noVariant = rows[0]
-        assertEquals("No Variant", noVariant.variant)
-        assertEquals(1564, noVariant.games)
-        assertEquals(listOf(25, 25, 25, 25, 25), noVariant.best.map { it.score })
-        assertEquals(listOf(25, 25, 25, 25, 25), noVariant.best.map { it.max })
-        assertTrue(noVariant.best.none { it.modified })
-
-        val muddy = rows[1]
-        assertEquals(listOf(30, 30, 0, 0, 0), muddy.best.map { it.score })
-        assertEquals(listOf(30, 30, 30, 30, 30), muddy.best.map { it.max })
-        assertFalse(muddy.best[0].modified)
+        assertEquals("No Variant", rows[0].variant)
+        // Table sizes 2 to 6; a size nobody played is a 0.
+        assertEquals(listOf(25, 24, 0, 25, 0), rows[0].best.map { it.score })
+        assertEquals(listOf(25, 25, 25, 25, 25), rows[0].best.map { it.max })
+        assertTrue(rows[0].best.none { it.modified })
         // A score made with an option still counts, but is marked.
-        assertTrue(muddy.best[1].modified)
-
+        assertTrue(rows[1].best[2].modified)
+        assertFalse(rows[1].best[0].modified)
+        // Entities in the attribute are decoded before the JSON is read.
         assertEquals("Omni & Black", rows[2].variant)
-        assertEquals(0, rows[2].games)
         assertTrue(rows[2].best.all { it.score == 0 })
         assertNull(rows[2].average)
+    }
+
+    @Test fun aPageWithoutTheTableHasNoScores() {
+        assertNull(parseBestScores("<html>Error</html>"))
+    }
+
+    @Test fun theGridHasNoGamesColumnOrAverages() {
+        val page = profileOf(ProtocolJson.decodeFromString(PlayerScores.serializer(), scores))
+        assertFalse(page.hasAverages)
+        assertFalse(page.hasGames)
     }
 }
