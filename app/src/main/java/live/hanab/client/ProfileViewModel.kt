@@ -94,7 +94,11 @@ class ProfileViewModel(app: Application) : AndroidViewModel(app) {
             _ui.update { it.copy(scoresLoading = true, scoresError = null) }
             try {
                 val page = source.scores()
-                _ui.update { it.copy(scores = page) }
+                // Without a games column there is nothing to sort by it: fall back to the names.
+                _ui.update {
+                    if (!page.hasGames && it.sortColumn == GridColumn.Games) it.copy(scores = page, sortColumn = GridColumn.Variant, sortDescending = false)
+                    else it.copy(scores = page)
+                }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: NoSuchPlayer) {

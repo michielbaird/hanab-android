@@ -23,7 +23,7 @@ fn cargo_home() -> Option<PathBuf> {
 fn published_commit(version: &str) -> Option<String> {
     let sources = cargo_home()?.join("registry").join("src");
     for index in fs::read_dir(sources).ok()? {
-        let info = index.ok()?.path().join(format!("hanabi_protocol-{version}")).join(".cargo_vcs_info.json");
+        let info = index.ok()?.path().join(format!("hanabi-protocol-{version}")).join(".cargo_vcs_info.json");
         if let Ok(text) = fs::read_to_string(info) {
             return text.split("\"sha1\"").nth(1)?.split('"').nth(1).map(str::to_owned);
         }
@@ -36,7 +36,7 @@ fn crate_directory(version: &str, rev: &str, git: bool) -> Option<PathBuf> {
     let home = cargo_home()?;
     // A git pin keeps the version of the crate it was made from, so the registry may hold a different, older copy of the same version.
     for index in fs::read_dir(home.join("registry").join("src")).into_iter().flatten().flatten().filter(|_| !git) {
-        let dir = index.path().join(format!("hanabi_protocol-{version}"));
+        let dir = index.path().join(format!("hanabi-protocol-{version}"));
         if dir.join("fixtures").is_dir() {
             return Some(dir);
         }
@@ -56,7 +56,7 @@ fn main() {
     let lock = fs::read_to_string("Cargo.lock").expect("Cargo.lock");
     let block = lock
         .split("[[package]]")
-        .find(|block| field(block, "name").as_deref() == Some("hanabi_protocol"))
+        .find(|block| matches!(field(block, "name").as_deref(), Some("hanabi-protocol" | "hanabi_protocol")))
         .expect("Cargo.lock has hanabi_protocol");
     let version = field(block, "version").expect("a version");
     let git = field(block, "source").is_some_and(|source| source.starts_with("git+"));

@@ -26,7 +26,7 @@ paths=(server/protocol packages/data/src/generated packages/game/src/generated p
 # The version of hanabi_protocol that Cargo.lock pins.
 pin_version() {
   local version
-  version="$(grep -A1 '^name = "hanabi_protocol"' "$lock" | sed -n 's/^version = "\(.*\)"/\1/p')"
+  version="$(grep -A1 '^name = "hanabi[-_]protocol"' "$lock" | sed -n 's/^version = "\(.*\)"/\1/p')"
   [ -n "$version" ] || { echo "No hanabi_protocol in $lock" >&2; exit 1; }
   echo "$version"
 }
@@ -64,7 +64,7 @@ deployed_rev() {
 
 # sed -i differs between GNU and BSD; write through a temp file.
 set_dependency() {
-  awk -v line="$1" '/^hanabi_protocol *=/ { print line; next } { print }' "$manifest" > "$manifest.new" && mv "$manifest.new" "$manifest"
+  awk -v line="$1" '/^hanabi[-_]protocol *=/ { print line; next } { print }' "$manifest" > "$manifest.new" && mv "$manifest.new" "$manifest"
 }
 
 case "${1:-}" in
@@ -133,14 +133,14 @@ case "${1:-}" in
     target="${2:-}"
     [ -n "$target" ] || target="$(latest_version)"
     if echo "$target" | grep -q '^[0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*'; then
-      set_dependency "hanabi_protocol = \"$target\""
+      set_dependency "hanabi-protocol = \"$target\""
     else
       [ "$target" = main ] && target="$(upstream_head)"
       rev="$(github "commits/$target" | sed -n 's/^{"sha":"\([0-9a-f]\{40\}\)".*/\1/p')"
       [ -n "$rev" ] || { echo "Could not find that commit" >&2; exit 1; }
-      set_dependency "hanabi_protocol = { git = \"https://github.com/$repo\", rev = \"$rev\" }"
+      set_dependency "hanabi-protocol = { git = \"https://github.com/$repo\", rev = \"$rev\" }"
     fi
-    (cd "$tool" && cargo update --quiet --package hanabi_protocol)
+    (cd "$tool" && cargo update --quiet --package hanabi-protocol || cargo update --quiet --package hanabi_protocol || true)
     # The website's test cases come with the crate, whichever way it is pinned.
     mkdir -p "$(dirname "$fixtures")"
     (cd "$tool" && cargo run --quiet -- --fixtures "$fixtures")

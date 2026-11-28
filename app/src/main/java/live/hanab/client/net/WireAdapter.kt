@@ -123,8 +123,8 @@ class WireAdapter(
         is InInvalid -> unreadable(m.command, m.error)
         // The rest the app has no use for (yet).
         is InUnknown, is InBlocked, is InFriends, is InChatDeleted, is InChatTyping, is InClock, is InConnections,
-        is InIdleReset, is InIdleWarning, is InLobbyStatus, is InPause, is InServerShutdown,
-        is InSpectators, is InTableRestartDecliners, is InTableSettingsSuggestion, is InTableSuggestion,
+        is InAchievementUnlocked, is InIdleReset, is InIdleWarning, is InLobbyStatus, is InPause, is InServerShutdown,
+        is InSpectators, is InTableRestartDecliners, is InTableSettingsSuggestion,
         -> emptyList()
     }
 

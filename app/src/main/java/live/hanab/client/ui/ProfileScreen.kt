@@ -92,7 +92,10 @@ private val columnHeaders = mapOf(
 
 /** The columns shown: the website's page stopped giving an average and a strikeout rate, so those are dropped. */
 private fun columnsOf(ui: ProfileUi): List<GridColumn> =
-    GridColumn.entries.filter { (ui.scores?.hasAverages ?: true) || it == GridColumn.Variant || it <= GridColumn.Best6 }
+    GridColumn.entries.filter {
+        ((ui.scores?.hasAverages ?: true) || it == GridColumn.Variant || it <= GridColumn.Best6) &&
+            ((ui.scores?.hasGames ?: true) || it != GridColumn.Games)
+    }
 
 private fun sortKey(row: VariantRow, column: GridColumn): Comparable<*> = when (column) {
     GridColumn.Variant -> row.variant.lowercase()
@@ -195,7 +198,7 @@ private fun GridRow(row: VariantRow, scroll: androidx.compose.foundation.ScrollS
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         Text(row.variant, style = MaterialTheme.typography.bodySmall, modifier = Modifier.width(NAME_WIDTH).padding(vertical = 8.dp))
         Row(Modifier.horizontalScroll(scroll), verticalAlignment = Alignment.CenterVertically) {
-            Cell("${row.games}")
+            if (GridColumn.Games in columns) Cell("${row.games}")
             row.best.forEach { b ->
                 // A best of 0 is a size never played (or never scored); the max is the most the variant allows.
                 Cell(

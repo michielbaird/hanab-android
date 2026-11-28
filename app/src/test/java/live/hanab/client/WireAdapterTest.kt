@@ -46,6 +46,9 @@ class WireAdapterTest {
 
     private fun obj(text: String) = HanabJson.parseToJsonElement(text).jsonObject
 
+    /** The rules the server sends with a game's setup; the app takes its own from the variant id. */
+    private val rules = """{"colors":[],"suits":[],"variant":{"id":0,"name":"No Variant","recipe":"No Variant","suits":[]}}"""
+
     private val noVariant = """{"variantId":0,"speedrun":false,"deckPlays":false,"emptyClues":false,"oneExtraCard":false,"oneLessCard":false,"allOrNothing":false,"detrimentalCharacters":false}"""
 
     @Test fun welcomeBecomesTheOldOne() {
@@ -182,7 +185,7 @@ class WireAdapterTest {
         assertEquals("true", inbound("tableJoined", """{"tableId":8838,"stage":"replay"}""", adapter)[1].data!!.jsonObject["replay"]!!.jsonPrimitive.content)
         val init = reply(
             "gameInitLoad",
-            """{"characters":[],"customDeal":false,"mode":{"type":"playing","ourPlayerIndex":2},"options":${noVariant.replace("\"variantId\":0", "\"variantId\":1")},"playerNames":["a","b","c"],"startedAt":"2026-11-11T07:09:51.884Z"}""",
+            """{"characters":[],"customDeal":false,"variant":$rules,"mode":{"type":"playing","ourPlayerIndex":2},"options":${noVariant.replace("\"variantId\":0", "\"variantId\":1")},"playerNames":["a","b","c"],"startedAt":"2026-11-11T07:09:51.884Z"}""",
             adapter, 8838L,
         ).single().data!!.jsonObject
         assertEquals("false", init["spectating"]!!.jsonPrimitive.content)
@@ -192,7 +195,7 @@ class WireAdapterTest {
 
         val spectating = reply(
             "gameInitLoad",
-            """{"characters":[],"customDeal":false,"mode":{"type":"spectating"},"options":$noVariant,"playerNames":["a","b"],"startedAt":"2026-11-11T07:09:51.884Z","tableId":1}""",
+            """{"characters":[],"customDeal":false,"variant":$rules,"mode":{"type":"spectating"},"options":$noVariant,"playerNames":["a","b"],"startedAt":"2026-11-11T07:09:51.884Z","tableId":1}""",
             adapter,
         ).single().data!!.jsonObject
         assertEquals("true", spectating["spectating"]!!.jsonPrimitive.content)
@@ -200,7 +203,7 @@ class WireAdapterTest {
 
     private fun game(vararg events: String): GameState {
         val adapter = adapter()
-        reply("gameInitLoad", """{"characters":[],"customDeal":false,"mode":{"type":"playing","ourPlayerIndex":0},"options":$noVariant,"playerNames":["me","bob"],"startedAt":"2026-11-11T07:09:51.884Z","tableId":1}""", adapter)
+        reply("gameInitLoad", """{"characters":[],"customDeal":false,"variant":$rules,"mode":{"type":"playing","ourPlayerIndex":0},"options":$noVariant,"playerNames":["me","bob"],"startedAt":"2026-11-11T07:09:51.884Z","tableId":1}""", adapter)
         val state = inbound(
             "gameState",
             """{"events":[${events.joinToString(",")}],"notes":[],"phase":{"type":"replay","deck":[]},"spectators":[],"tableId":1}""",
@@ -272,7 +275,7 @@ class WireAdapterTest {
 
     @Test fun anUntimedClockCountsUpButTheAppReadsItDown() {
         val adapter = adapter()
-        reply("gameInitLoad", """{"characters":[],"customDeal":false,"mode":{"type":"playing","ourPlayerIndex":0},"options":$noVariant,"playerNames":["a","b"],"startedAt":"2026-11-11T07:09:51.884Z","tableId":1}""", adapter)
+        reply("gameInitLoad", """{"characters":[],"customDeal":false,"variant":$rules,"mode":{"type":"playing","ourPlayerIndex":0},"options":$noVariant,"playerNames":["a","b"],"startedAt":"2026-11-11T07:09:51.884Z","tableId":1}""", adapter)
         val times = inbound("gameEvent", """{"tableId":1,"events":[{"type":"playerTimes","durationMs":4000,"playerTimesMs":[1500,2500]}]}""", adapter).single()
         val action = times.data!!.jsonObject["action"]!!.jsonObject
         assertEquals(listOf("-1500", "-2500"), action["playerTimes"]!!.jsonArray.map { it.jsonPrimitive.content })
@@ -281,7 +284,7 @@ class WireAdapterTest {
 
     @Test fun theEventsOfOneActionBecomeOneMessageEachInOrder() {
         val adapter = adapter()
-        reply("gameInitLoad", """{"characters":[],"customDeal":false,"mode":{"type":"playing","ourPlayerIndex":0},"options":$noVariant,"playerNames":["a","b"],"startedAt":"2026-11-11T07:09:51.884Z","tableId":1}""", adapter)
+        reply("gameInitLoad", """{"characters":[],"customDeal":false,"variant":$rules,"mode":{"type":"playing","ourPlayerIndex":0},"options":$noVariant,"playerNames":["a","b"],"startedAt":"2026-11-11T07:09:51.884Z","tableId":1}""", adapter)
         val messages = inbound("gameEvent", """{"tableId":1,"events":[{"type":"turn","turn":3,"currentPlayerIndex":1},{"type":"playerTimes","durationMs":4000,"playerTimesMs":[1500,2500]}]}""", adapter)
         assertEquals(2, messages.size)
         assertEquals(listOf("turn", "playerTimes"), messages.map { it.data!!.jsonObject["action"]!!.jsonObject["type"]!!.jsonPrimitive.content })

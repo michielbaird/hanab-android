@@ -33,7 +33,7 @@ $paths = 'server/protocol', 'packages/data/src/generated', 'packages/game/src/ge
 # The version of hanabi_protocol that Cargo.lock pins.
 function Get-PinVersion {
     $text = Get-Content $lock -Raw
-    if ($text -notmatch '(?s)name = "hanabi_protocol"\s+version = "([^"]+)"') { throw "No hanabi_protocol in $lock" }
+    if ($text -notmatch '(?s)name = "hanabi[-_]protocol"\s+version = "([^"]+)"') { throw "No hanabi_protocol in $lock" }
     $Matches[1]
 }
 
@@ -78,7 +78,7 @@ function Get-DeployedRev {
 }
 
 function Set-Dependency([string]$Line) {
-    $text = (Get-Content $manifest -Raw) -replace '(?m)^hanabi_protocol\s*=.*$', $Line
+    $text = (Get-Content $manifest -Raw) -replace '(?m)^hanabi[-_]protocol\s*=.*$', $Line
     [IO.File]::WriteAllText($manifest, $text)
 }
 
@@ -141,15 +141,15 @@ switch ($Command) {
     'bump' {
         if (-not $Target) { $Target = Get-LatestVersion }
         if ($Target -match '^\d+\.\d+\.\d+') {
-            Set-Dependency "hanabi_protocol = `"$Target`""
+            Set-Dependency "hanabi-protocol = `"$Target`""
         } else {
             if ($Target -eq 'main') { $Target = Get-UpstreamHead }
             $rev = (Invoke-GitHub "commits/$Target").sha
-            Set-Dependency "hanabi_protocol = { git = `"https://github.com/$repo`", rev = `"$rev`" }"
+            Set-Dependency "hanabi-protocol = { git = `"https://github.com/$repo`", rev = `"$rev`" }"
         }
         Push-Location $tool
         try {
-            cargo update --quiet --package hanabi_protocol
+            cargo update --quiet --package hanabi-protocol 2>$null; if ($LASTEXITCODE -ne 0) { cargo update --quiet --package hanabi_protocol 2>$null }; $global:LASTEXITCODE = 0
             if ($LASTEXITCODE -ne 0) { throw "cargo update failed" }
         } finally { Pop-Location }
         # The website's test cases come with the crate, whichever way it is pinned.
